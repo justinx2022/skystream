@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/addon_manifest.dart';
 import 'addon_client.dart';
+import 'builtin_addons.dart';
 
 part 'addon_repository.g.dart';
 
@@ -69,6 +70,25 @@ class AddonRepository extends _$AddonRepository {
         }
       }
       state = AddonsState(addons: addons, isLoading: false);
+
+      // Pre-seed Torrentio for Western and Hollywood content if not present
+      if (!addons.any((a) => a.manifestUrl.contains('torrentio'))) {
+        try {
+          final client = ref.read(addonClientProvider);
+          final torrentio = await client.fetchManifest(BuiltInAddons.torrentioUrl);
+          if (torrentio != null) {
+            final next = List<ManagedAddon>.from(state.addons);
+            next.add(ManagedAddon(
+              manifestUrl: BuiltInAddons.torrentioUrl,
+              addedAt: DateTime.now(),
+              manifest: torrentio,
+            ));
+            await _persist(next);
+          }
+        } catch (error) {
+          if (kDebugMode) debugPrint('[AddonRepository] could not pre-seed Torrentio: $error');
+        }
+      }
       // Manifests can change (new catalogs, renamed rows), but the refresh is
       // not started from here: the launch runs [autoUpdate] once for every
       // extension system, and a second pass would fetch everything twice.

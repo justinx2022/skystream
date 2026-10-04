@@ -332,8 +332,10 @@ Future<ResolvedPlayback> resolvePlayback({
       ? raw
       : await _byQuality(raw, settings, (v) => didFallback = v);
 
-  // Apply provider health scoring to prioritize fast and reliable providers
-  if (!handPicked && streams.length > 1) {
+  // Apply provider health scoring to prioritize fast and reliable providers if enabled
+  if (!handPicked &&
+      streams.length > 1 &&
+      (settings?.autoHealthScoringEnabled ?? true)) {
     try {
       final health = read(providerHealthServiceProvider);
       streams = health.rankSourcesByHealth<StreamResult>(

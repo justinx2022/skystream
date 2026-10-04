@@ -13,6 +13,8 @@ class BuiltInAddons {
 
   static const String cinemetaUrl =
       'https://v3-cinemeta.strem.io/manifest.json';
+  static const String torrentioUrl =
+      'https://torrentio.strem.fun/manifest.json';
 
   static final ManagedAddon cinemeta = ManagedAddon(
     manifestUrl: cinemetaUrl,

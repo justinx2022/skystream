@@ -184,6 +184,24 @@ class PlayerSettingsScreen extends ConsumerWidget {
                     ),
                   ),
                   SettingsTile(
+                    icon: Icons.health_and_safety_rounded,
+                    title: 'Auto Health Scoring & Failover',
+                    subtitle: playerSettings.autoHealthScoringEnabled
+                        ? 'Prioritizing fast, healthy links & auto-switching'
+                        : 'Standard provider order without auto-switching',
+                    trailing: Switch(
+                      value: playerSettings.autoHealthScoringEnabled,
+                      onChanged: (val) => ref
+                          .read(playerSettingsProvider.notifier)
+                          .setAutoHealthScoringEnabled(val),
+                    ),
+                    onTap: () => ref
+                        .read(playerSettingsProvider.notifier)
+                        .setAutoHealthScoringEnabled(
+                          !playerSettings.autoHealthScoringEnabled,
+                        ),
+                  ),
+                  SettingsTile(
                     icon: Icons.aspect_ratio_rounded,
                     title: l10n.defaultResizeMode,
                     subtitle: getResizeModeLabel(

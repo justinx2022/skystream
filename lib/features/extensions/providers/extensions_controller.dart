@@ -129,7 +129,21 @@ class ExtensionsController extends _$ExtensionsController {
       // repositories used to wait for five round trips end to end - on the
       // Extensions screen that is five spinner-seconds they watch.
       final prefs = await SharedPreferences.getInstance();
-      final urls = prefs.getStringList(repoUrlsKey) ?? [];
+      var urls = prefs.getStringList(repoUrlsKey) ?? [];
+      // Filter out any regional Indian repositories (Hindmovie, CNCVerse, TJ-Plugins)
+      final cleanUrls = urls
+          .where((u) =>
+              !u.contains('CNCVerse') &&
+              !u.contains('Hindmovie') &&
+              !u.contains('TJ-Plugins') &&
+              !u.contains('likhithkrishna1103') &&
+              !u.contains('NivinCNC') &&
+              !u.contains('Skywave22'))
+          .toList();
+      if (cleanUrls.length != urls.length) {
+        await prefs.setStringList(repoUrlsKey, cleanUrls);
+        urls = cleanUrls;
+      }
 
       final fetched = await Future.wait(
         urls.map((url) => _loadRepo(url, repositoryService)),
@@ -539,6 +553,17 @@ class ExtensionsController extends _$ExtensionsController {
       return;
     }
     visitedUrls.add(url);
+
+    // Skip regional Indian repositories
+    if (url.contains('CNCVerse') ||
+        url.contains('Hindmovie') ||
+        url.contains('TJ-Plugins') ||
+        url.contains('likhithkrishna1103') ||
+        url.contains('NivinCNC') ||
+        url.contains('Skywave22')) {
+      if (kDebugMode) debugPrint("Filtered excluded regional repo: $url");
+      return;
+    }
 
     state = ExtensionsLoading(
       installedPlugins: state.installedPlugins,

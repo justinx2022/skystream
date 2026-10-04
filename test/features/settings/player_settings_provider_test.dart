@@ -131,6 +131,21 @@ void main() {
     );
   });
 
+  test('autoHealthScoringEnabled defaults to true and survives copyWith', () {
+    const PlayerSettings defaults = PlayerSettings();
+    expect(defaults.autoHealthScoringEnabled, isTrue);
+
+    final PlayerSettings disabled = defaults.copyWith(
+      autoHealthScoringEnabled: false,
+    );
+    expect(disabled.autoHealthScoringEnabled, isFalse);
+
+    final PlayerSettings enabled = disabled.copyWith(
+      autoHealthScoringEnabled: true,
+    );
+    expect(enabled.autoHealthScoringEnabled, isTrue);
+  });
+
   test('the live subtitle appearance fields survive copyWith', () {
     const PlayerSettings defaults = PlayerSettings();
     expect(defaults.subtitleSize, 22.0);

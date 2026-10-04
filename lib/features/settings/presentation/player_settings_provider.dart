@@ -126,6 +126,11 @@ class PlayerSettings {
   /// Dynamically sized based on stream resolution/bitrate.
   final int? bufferDurationMinutes;
 
+  /// Whether automated provider health scoring and auto-failover is enabled.
+  /// When true, tracks latency and failure rates, ranks candidates by health,
+  /// and automatically fails over on stalls or network drops.
+  final bool autoHealthScoringEnabled;
+
   /// Maximum volume the player allows, as a percentage (100–200).
   /// mpv can amplify beyond the source level; 100 disables the boost.
   final int maxVolumePercent;
@@ -183,6 +188,7 @@ class PlayerSettings {
     this.qualityFilterMode = QualityFilterMode.any,
     this.networkBufferMb,
     this.bufferDurationMinutes,
+    this.autoHealthScoringEnabled = true,
     this.maxVolumePercent = 200,
     this.showRemainingTime = false,
     this.showPip = true,
@@ -218,6 +224,7 @@ class PlayerSettings {
     QualityFilterMode? qualityFilterMode,
     int? networkBufferMb,
     int? bufferDurationMinutes,
+    bool? autoHealthScoringEnabled,
     int? maxVolumePercent,
     bool? showRemainingTime,
     bool? showPip,
@@ -256,6 +263,8 @@ class PlayerSettings {
       networkBufferMb: networkBufferMb ?? this.networkBufferMb,
       bufferDurationMinutes:
           bufferDurationMinutes ?? this.bufferDurationMinutes,
+      autoHealthScoringEnabled:
+          autoHealthScoringEnabled ?? this.autoHealthScoringEnabled,
       maxVolumePercent: maxVolumePercent ?? this.maxVolumePercent,
       showRemainingTime: showRemainingTime ?? this.showRemainingTime,
       showPip: showPip ?? this.showPip,
@@ -425,6 +434,12 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     final bufferDurationMinutes = storage.getPlayerSetting<int>(
       'player_buffer_duration_min',
     );
+    final autoHealthScoringEnabled =
+        storage.getPlayerSetting<bool>(
+          'player_auto_health_scoring',
+          defaultValue: true,
+        ) ??
+        true;
     final maxVolumePercent =
         storage.getPlayerSetting<int>('player_max_volume', defaultValue: 200) ??
         200;
@@ -450,6 +465,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       qualityFilterMode: filterMode,
       networkBufferMb: networkBufferMb,
       bufferDurationMinutes: bufferDurationMinutes,
+      autoHealthScoringEnabled: autoHealthScoringEnabled,
       maxVolumePercent: maxVolumePercent,
       showRemainingTime: showRemaining,
       showPip: showPip,
@@ -578,6 +594,11 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     );
     await _repository.setPlayerSetting('player_buffer_duration_min', clamped);
     _update((PlayerSettings c) => c.copyWith(bufferDurationMinutes: clamped));
+  }
+
+  Future<void> setAutoHealthScoringEnabled(bool enabled) async {
+    await _repository.setPlayerSetting('player_auto_health_scoring', enabled);
+    _update((PlayerSettings c) => c.copyWith(autoHealthScoringEnabled: enabled));
   }
 
   Future<void> setMaxVolumePercent(int percent) async {

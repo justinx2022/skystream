@@ -1728,7 +1728,13 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     final resolved = _resolved;
     if (resolved == null) return;
 
-    if (_attemptIndex >= 0 && _attemptIndex < resolved.streams.length) {
+    final autoHealthEnabled =
+        _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
+            true;
+
+    if (autoHealthEnabled &&
+        _attemptIndex >= 0 &&
+        _attemptIndex < resolved.streams.length) {
       try {
         final stream = resolved.streams[_attemptIndex];
         final pid = stream.source.isNotEmpty
@@ -2236,8 +2242,12 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     );
     if (health == VideoHealth.ok) {
       if (_videoWindow >= const Duration(seconds: 15)) {
+        final autoHealthEnabled =
+            _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
+                true;
         final resolved = _resolved;
-        if (resolved != null &&
+        if (autoHealthEnabled &&
+            resolved != null &&
             _attemptIndex >= 0 &&
             _attemptIndex < resolved.streams.length) {
           try {
