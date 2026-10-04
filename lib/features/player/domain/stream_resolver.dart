@@ -28,6 +28,7 @@ import '../../../core/network/probe_answer.dart';
 import '../../../core/utils/app_utils.dart';
 import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
+import '../../../core/services/provider_health_service.dart';
 import '../../library/presentation/history_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
@@ -293,9 +294,23 @@ Future<ResolvedPlayback> resolvePlayback({
   if (handPicked) {
     raw = preloaded;
   } else {
+    final sw = Stopwatch()..start();
     try {
       raw = await provider!.loadStreams(videoUrl);
+      sw.stop();
+      try {
+        read(providerHealthServiceProvider).recordSuccess(
+          provider.packageName,
+          responseTime: sw.elapsed,
+        );
+      } catch (_) {}
     } catch (e) {
+      try {
+        read(providerHealthServiceProvider).recordFailure(
+          provider?.packageName ?? '',
+          reason: '$e',
+        );
+      } catch (_) {}
       throw StreamResolutionException(
         StreamResolutionFailure.loadFailed,
         detail: '$e',
@@ -313,9 +328,22 @@ Future<ResolvedPlayback> resolvePlayback({
   // drop the picked one out of it altogether.
   var didFallback = false;
   final settings = await _playerSettings(read);
-  final streams = handPicked || settings == null
+  var streams = handPicked || settings == null
       ? raw
       : await _byQuality(raw, settings, (v) => didFallback = v);
+
+  // Apply provider health scoring to prioritize fast and reliable providers
+  if (!handPicked && streams.length > 1) {
+    try {
+      final health = read(providerHealthServiceProvider);
+      streams = health.rankSourcesByHealth<StreamResult>(
+        sources: streams,
+        getProviderId: (s) =>
+            s.source.isNotEmpty ? s.source : (provider?.packageName ?? ''),
+      );
+    } catch (_) {}
+  }
+
   if (streams.isEmpty) {
     throw const StreamResolutionException(StreamResolutionFailure.noStreams);
   }

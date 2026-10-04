@@ -20,7 +20,16 @@ import '../../../core/providers/device_info_provider.dart';
 /// range: a gigabyte is most of what a 2 GB handset has. The tier defaults
 /// below are what protect a fresh install; this list is what someone who has
 /// gone looking for the setting is allowed to ask for.
-const List<int> kNetworkBufferChoicesMb = <int>[64, 128, 256, 512, 1024];
+const List<int> kNetworkBufferChoicesMb = <int>[
+  64,
+  128,
+  256,
+  512,
+  1024,
+  2048,
+  4096,
+  8192,
+];
 
 /// Where a device starts before anyone chooses.
 ///
@@ -28,24 +37,93 @@ const List<int> kNetworkBufferChoicesMb = <int>[64, 128, 256, 512, 1024];
 /// folds in Android's own low-RAM flag, which an OEM sets knowing things about
 /// the device that a number does not capture.
 int defaultNetworkBufferMb(DeviceTier tier) => switch (tier) {
-  // Cheap sticks and old phones. 128 MB is still eight times libVLC's own
-  // 16 MiB default and leaves the decoder room to work.
-  DeviceTier.low => 128,
+  // Cheap sticks and old phones. 256 MB leaves plenty of room.
+  DeviceTier.low => 256,
 
   // Ordinary phones, tablets and TV boxes.
-  DeviceTier.standard => 256,
+  DeviceTier.standard => 512,
 
-  // Anything with memory to spare. Every desktop is here by definition, and
-  // so is any handset or tablet reporting 6 GB or more - the tier is a RAM
-  // verdict, not a platform one, so a modern phone gets the same 512 MB a
-  // laptop does.
-  DeviceTier.high => 512,
+  // Anything with memory to spare. Desktops and high-RAM devices get 2048 MB (2 GB).
+  DeviceTier.high => 2048,
 };
 
-/// The buffer to actually use: what the viewer chose, or this device's default
-/// when they have not chosen.
-int resolveNetworkBufferMb(int? chosen, DeviceTier tier) =>
-    chosen ?? defaultNetworkBufferMb(tier);
+/// The buffer durations offered to the viewer, in minutes.
+///
+/// Ranges from 2 minutes up to 90 minutes (1 hour 30 minutes).
+const List<int> kBufferDurationMinutesChoices = <int>[
+  2,
+  5,
+  10,
+  15,
+  30,
+  45,
+  60,
+  90,
+];
+
+/// The default buffer duration in minutes when the viewer has not chosen one.
+int defaultBufferDurationMinutes(DeviceTier tier) => switch (tier) {
+  DeviceTier.low => 5,
+  DeviceTier.standard => 15,
+  DeviceTier.high => 45,
+};
+
+/// Formats a buffer duration in minutes into a human-readable string (e.g. "2 min", "1 hr", "1h 30m").
+String formatBufferDuration(int minutes) {
+  if (minutes < 60) {
+    return '$minutes min';
+  }
+  final hours = minutes ~/ 60;
+  final remaining = minutes % 60;
+  if (remaining == 0) {
+    return '$hours hr${hours > 1 ? "s" : ""}';
+  }
+  return '${hours}h ${remaining}m';
+}
+
+/// Converts a requested duration (in minutes) and estimated video bitrate
+/// into megabytes, bounded safely by device tier to avoid Out-Of-Memory (OOM) crashes.
+int bufferDurationToMb({
+  required int durationMinutes,
+  String? quality,
+  required DeviceTier tier,
+}) {
+  final double mbPerMin = switch (quality?.toLowerCase()) {
+    '4k' || '2160p' => 135.0,
+    '1080p' || 'fhd' => 45.0,
+    '720p' || 'hd' => 25.0,
+    _ => 35.0,
+  };
+
+  final calculatedMb = (durationMinutes * mbPerMin).round();
+
+  // Maximum memory safety caps based on device tier
+  final maxSafeMb = switch (tier) {
+    DeviceTier.low => 512,
+    DeviceTier.standard => 1536,
+    DeviceTier.high => 8192,
+  };
+
+  return calculatedMb.clamp(64, maxSafeMb);
+}
+
+/// The buffer to actually use: what the viewer chose (either by duration or direct size),
+/// or this device's default when they have not chosen.
+int resolveNetworkBufferMb(
+  int? chosenMb,
+  DeviceTier tier, {
+  int? chosenDurationMinutes,
+  String? quality,
+}) {
+  if (chosenDurationMinutes != null && chosenDurationMinutes > 0) {
+    return bufferDurationToMb(
+      durationMinutes: chosenDurationMinutes,
+      quality: quality,
+      tier: tier,
+    );
+  }
+  return chosenMb ?? defaultNetworkBufferMb(tier);
+}
 
 /// The most of a torrent cache worth spending on data already played.
 ///

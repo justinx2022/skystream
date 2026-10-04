@@ -121,6 +121,11 @@ class PlayerSettings {
   /// different device.
   final int? networkBufferMb;
 
+  /// How long the player should buffer ahead, in minutes (2 to 90 min).
+  ///
+  /// Dynamically sized based on stream resolution/bitrate.
+  final int? bufferDurationMinutes;
+
   /// Maximum volume the player allows, as a percentage (100–200).
   /// mpv can amplify beyond the source level; 100 disables the boost.
   final int maxVolumePercent;
@@ -177,6 +182,7 @@ class PlayerSettings {
     this.mobileQuality = QualityPreference.q1080,
     this.qualityFilterMode = QualityFilterMode.any,
     this.networkBufferMb,
+    this.bufferDurationMinutes,
     this.maxVolumePercent = 200,
     this.showRemainingTime = false,
     this.showPip = true,
@@ -211,6 +217,7 @@ class PlayerSettings {
     QualityPreference? mobileQuality,
     QualityFilterMode? qualityFilterMode,
     int? networkBufferMb,
+    int? bufferDurationMinutes,
     int? maxVolumePercent,
     bool? showRemainingTime,
     bool? showPip,
@@ -247,6 +254,8 @@ class PlayerSettings {
       mobileQuality: mobileQuality ?? this.mobileQuality,
       qualityFilterMode: qualityFilterMode ?? this.qualityFilterMode,
       networkBufferMb: networkBufferMb ?? this.networkBufferMb,
+      bufferDurationMinutes:
+          bufferDurationMinutes ?? this.bufferDurationMinutes,
       maxVolumePercent: maxVolumePercent ?? this.maxVolumePercent,
       showRemainingTime: showRemainingTime ?? this.showRemainingTime,
       showPip: showPip ?? this.showPip,
@@ -413,6 +422,9 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     final networkBufferMb = storage.getPlayerSetting<int>(
       'player_network_buffer_mb',
     );
+    final bufferDurationMinutes = storage.getPlayerSetting<int>(
+      'player_buffer_duration_min',
+    );
     final maxVolumePercent =
         storage.getPlayerSetting<int>('player_max_volume', defaultValue: 200) ??
         200;
@@ -437,6 +449,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       mobileQuality: mobileQ,
       qualityFilterMode: filterMode,
       networkBufferMb: networkBufferMb,
+      bufferDurationMinutes: bufferDurationMinutes,
       maxVolumePercent: maxVolumePercent,
       showRemainingTime: showRemaining,
       showPip: showPip,
@@ -556,6 +569,15 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     );
     await _repository.setPlayerSetting('player_network_buffer_mb', clamped);
     _update((PlayerSettings c) => c.copyWith(networkBufferMb: clamped));
+  }
+
+  Future<void> setBufferDurationMinutes(int minutes) async {
+    final clamped = minutes.clamp(
+      kBufferDurationMinutesChoices.first,
+      kBufferDurationMinutesChoices.last,
+    );
+    await _repository.setPlayerSetting('player_buffer_duration_min', clamped);
+    _update((PlayerSettings c) => c.copyWith(bufferDurationMinutes: clamped));
   }
 
   Future<void> setMaxVolumePercent(int percent) async {

@@ -587,7 +587,8 @@ Widget _buildThemeOption(
 /// Plain megabytes. The buffer holds bytes, so this is the whole truth about
 /// it - how many seconds those buy depends on the bitrate, which is not known
 /// until a stream is open and differs per rendition anyway.
-String formatNetworkBuffer(int megabytes) => '$megabytes MB';
+String formatNetworkBuffer(int megabytes) =>
+    megabytes >= 1024 ? '${megabytes ~/ 1024} GB ($megabytes MB)' : '$megabytes MB';
 
 String formatSeekDuration(int seconds, AppLocalizations l10n) {
   if (seconds >= 60) {
@@ -724,6 +725,62 @@ void showNetworkBufferDialog(BuildContext context, WidgetRef ref, int current) {
                     ref
                         .read(playerSettingsProvider.notifier)
                         .setNetworkBufferMb(mb);
+                    Navigator.pop<void>(context);
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Shows a dialog to pick how long the video should buffer ahead (2 to 90 min).
+void showBufferDurationDialog(
+  BuildContext context,
+  WidgetRef ref,
+  int currentMinutes,
+) {
+  const options = kBufferDurationMinutesChoices;
+
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      surfaceTintColor: Colors.transparent,
+      title: const Text('Select Buffer Duration'),
+      content: RadioGroup<int>(
+        groupValue: currentMinutes,
+        onChanged: (val) {
+          if (val == null) return;
+          ref
+              .read(playerSettingsProvider.notifier)
+              .setBufferDurationMinutes(val);
+          Navigator.pop<void>(context);
+        },
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: options.map((minutes) {
+              final bool isCurrent = minutes == currentMinutes;
+              return _currentOption(
+                isCurrent: isCurrent,
+                child: ListTile(
+                  autofocus: isCurrent,
+                  title: Text(formatBufferDuration(minutes)),
+                  subtitle: Text(
+                    minutes <= 5
+                        ? 'Fast start, lower memory'
+                        : minutes <= 30
+                        ? 'Resilient, smooth seeking'
+                        : 'Deep buffer (long stream caching)',
+                  ),
+                  leading: Radio<int>(value: minutes),
+                  onTap: () {
+                    ref
+                        .read(playerSettingsProvider.notifier)
+                        .setBufferDurationMinutes(minutes);
                     Navigator.pop<void>(context);
                   },
                 ),

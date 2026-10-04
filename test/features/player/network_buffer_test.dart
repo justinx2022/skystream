@@ -136,7 +136,7 @@ void main() {
       // picture pool - and the top of this range is not sized for the bottom
       // of the device range.
       final largest = kNetworkBufferChoicesMb.last;
-      expect(largest, 1024);
+      expect(largest, 8192);
       expect(
         DeviceTier.values.map(defaultNetworkBufferMb),
         isNot(contains(largest)),
@@ -153,6 +153,48 @@ void main() {
         resolveNetworkBufferMb(null, DeviceTier.high),
         defaultNetworkBufferMb(DeviceTier.high),
       );
+    });
+
+    group('buffer duration choices', () {
+      test('duration choices range from 2 minutes to 90 minutes', () {
+        expect(kBufferDurationMinutesChoices.first, 2);
+        expect(kBufferDurationMinutesChoices.last, 90);
+        expect(kBufferDurationMinutesChoices, [2, 5, 10, 15, 30, 45, 60, 90]);
+      });
+
+      test('formats duration correctly', () {
+        expect(formatBufferDuration(2), '2 min');
+        expect(formatBufferDuration(15), '15 min');
+        expect(formatBufferDuration(60), '1 hr');
+        expect(formatBufferDuration(90), '1h 30m');
+      });
+
+      test('bufferDurationToMb computes safe megabytes bounded by device tier', () {
+        // Low tier capped at 512 MB
+        expect(
+          bufferDurationToMb(durationMinutes: 90, quality: '1080p', tier: DeviceTier.low),
+          512,
+        );
+        // High tier allows up to 8192 MB (90 * 45 = 4050 MB)
+        expect(
+          bufferDurationToMb(durationMinutes: 90, quality: '1080p', tier: DeviceTier.high),
+          4050,
+        );
+        // 5 min 1080p -> 225 MB
+        expect(
+          bufferDurationToMb(durationMinutes: 5, quality: '1080p', tier: DeviceTier.standard),
+          225,
+        );
+      });
+
+      test('resolveNetworkBufferMb prioritizes chosen duration', () {
+        final mb = resolveNetworkBufferMb(
+          256,
+          DeviceTier.high,
+          chosenDurationMinutes: 10,
+        );
+        expect(mb, bufferDurationToMb(durationMinutes: 10, tier: DeviceTier.high));
+      });
     });
   });
 }

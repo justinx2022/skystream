@@ -29,11 +29,15 @@ class PlayerSettingsScreen extends ConsumerWidget {
         ref.watch(playerSettingsProvider).asData?.value ??
         const PlayerSettings();
 
+    final durationMinutes = playerSettings.bufferDurationMinutes ??
+        defaultBufferDurationMinutes(profile?.tier ?? DeviceTier.standard);
+
     // The size in force: what the viewer chose, or what this device starts
     // with. Resolved here so the row and the dialog agree with the player.
     final bufferMb = resolveNetworkBufferMb(
       playerSettings.networkBufferMb,
       profile?.tier ?? DeviceTier.standard,
+      chosenDurationMinutes: playerSettings.bufferDurationMinutes,
     );
 
     // Whether this device has a touchscreen, which is the only thing the four
@@ -168,6 +172,16 @@ class PlayerSettingsScreen extends ConsumerWidget {
                     subtitle: formatNetworkBuffer(bufferMb),
                     onTap: () =>
                         showNetworkBufferDialog(context, ref, bufferMb),
+                  ),
+                  SettingsTile(
+                    icon: Icons.hourglass_top_rounded,
+                    title: 'Buffer Duration Ahead',
+                    subtitle: formatBufferDuration(durationMinutes),
+                    onTap: () => showBufferDurationDialog(
+                      context,
+                      ref,
+                      durationMinutes,
+                    ),
                   ),
                   SettingsTile(
                     icon: Icons.aspect_ratio_rounded,

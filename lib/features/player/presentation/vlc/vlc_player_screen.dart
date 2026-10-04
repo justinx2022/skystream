@@ -21,6 +21,7 @@ import '../../../settings/presentation/player_settings_provider.dart';
 import '../../../../core/extensions/providers.dart';
 import '../../../../core/models/torrent_status.dart';
 import '../../../../core/services/download_service.dart';
+import '../../../../core/services/provider_health_service.dart';
 import '../../../../core/services/local_proxy_service.dart';
 import '../../../../core/storage/episode_watch_repository.dart';
 import '../../../../core/storage/history_repository.dart';
@@ -1727,6 +1728,16 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     final resolved = _resolved;
     if (resolved == null) return;
 
+    if (_attemptIndex >= 0 && _attemptIndex < resolved.streams.length) {
+      try {
+        final stream = resolved.streams[_attemptIndex];
+        final pid = stream.source.isNotEmpty
+            ? stream.source
+            : (widget.item.provider ?? '');
+        _read(providerHealthServiceProvider).recordFailure(pid, reason: reason);
+      } catch (_) {}
+    }
+
     final startAt = _controller.value.isLive ? Duration.zero : _resumePosition;
 
     // A hand-picked source is on trial: the session it interrupted was fine,
@@ -2223,7 +2234,23 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       displayed: stats.displayedPictures - baseline.displayed,
       lost: stats.lostPictures - baseline.lost,
     );
-    if (health == VideoHealth.ok) return;
+    if (health == VideoHealth.ok) {
+      if (_videoWindow >= const Duration(seconds: 15)) {
+        final resolved = _resolved;
+        if (resolved != null &&
+            _attemptIndex >= 0 &&
+            _attemptIndex < resolved.streams.length) {
+          try {
+            final stream = resolved.streams[_attemptIndex];
+            final pid = stream.source.isNotEmpty
+                ? stream.source
+                : (widget.item.provider ?? '');
+            _read(providerHealthServiceProvider).recordSuccess(pid);
+          } catch (_) {}
+        }
+      }
+      return;
+    }
 
     // Whatever happens next reopens or replaces the media, so the window that
     // produced this verdict is spent either way.
@@ -3788,6 +3815,8 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   int get _bufferMb => resolveNetworkBufferMb(
     ref.read(playerSettingsProvider).asData?.value.networkBufferMb,
     ref.read(deviceProfileProvider).asData?.value.tier ?? DeviceTier.standard,
+    chosenDurationMinutes:
+        ref.read(playerSettingsProvider).asData?.value.bufferDurationMinutes,
   );
 
   /// Hands the torrent server the same buffer, split so some of it stays

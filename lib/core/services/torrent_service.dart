@@ -24,8 +24,8 @@ class TorrentService {
   /// server can be started by a source resolver long before anything with
   /// access to the viewer's settings runs. [applyBufferSettings] corrects it
   /// the moment the player knows better.
-  int _cacheMb = 128;
-  int _readAheadPercent = 75;
+  int _cacheMb = 512;
+  int _readAheadPercent = 85;
 
   /// Points the server's cache at the size the viewer chose for the player.
   ///
