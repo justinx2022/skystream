@@ -1,8 +1,6 @@
 name: Windows Release Installer
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 permissions:
