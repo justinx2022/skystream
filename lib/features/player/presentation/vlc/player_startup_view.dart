@@ -65,6 +65,7 @@ class PlayerStartupView extends StatefulWidget {
     this.currentIndex,
     this.failed = false,
     this.onRetry,
+    this.onSkipSource,
     this.onDoubleClick,
     this.isTv = false,
   });
@@ -107,6 +108,7 @@ class PlayerStartupView extends StatefulWidget {
   final ValueChanged<int> onPick;
   final VoidCallback onBack;
   final VoidCallback? onRetry;
+  final VoidCallback? onSkipSource;
 
   /// Toggles full screen. Null where there is no window to full-screen.
   final VoidCallback? onDoubleClick;
@@ -325,6 +327,24 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
             ],
           ),
         ),
+        if (!widget.failed && attempt != null && widget.onSkipSource != null) ...[
+          const SizedBox(height: 14),
+          CustomButton(
+            isPrimary: false,
+            onPressed: widget.onSkipSource,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.skip_next_rounded, size: 18),
+                  const SizedBox(width: 8),
+                  Text(l10n.playerSkipSource),
+                ],
+              ),
+            ),
+          ),
+        ],
         if (widget.failed && widget.onRetry != null) ...[
           const SizedBox(height: 18),
           CustomButton(

@@ -4248,6 +4248,9 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       currentIndex: current,
       failed: failed,
       onPick: _pickFromStartup,
+      onSkipSource: hasCurrent && (current + 1) < sources.length
+          ? () => _pickFromStartup(current + 1)
+          : null,
       onBack: _handleBack,
       onRetry: _retry,
       // Desktop only, like the gesture over the video it mirrors: a phone or

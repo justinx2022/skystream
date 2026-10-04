@@ -169,6 +169,7 @@ class PlaybackLauncher {
     }
 
     bool isCanceled = false;
+    bool isSkipped = false;
     bool dialogDismissed = false;
     unawaited(
       LoadingDialog.show(
@@ -177,6 +178,11 @@ class PlaybackLauncher {
         onCancel: () {
           isCanceled = true;
           dialogDismissed = true;
+        },
+        onSkip: () {
+          isSkipped = true;
+          dialogDismissed = true;
+          unawaited(_openInternal(context, item, episodeDataUrl));
         },
       ),
     );
@@ -198,7 +204,7 @@ class PlaybackLauncher {
       if (provider == null) throw Exception('No active provider');
 
       final streams = await provider.loadStreams(episodeDataUrl);
-      if (isCanceled || !context.mounted) return;
+      if (isCanceled || isSkipped || !context.mounted) return;
 
       if (!dialogDismissed) {
         Navigator.of(context).pop(); // Dismiss loading dialog

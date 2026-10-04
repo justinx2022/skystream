@@ -6,11 +6,13 @@ import 'loading_indicator.dart';
 class LoadingDialog extends StatelessWidget {
   final String message;
   final VoidCallback onCancel;
+  final VoidCallback? onSkip;
 
   const LoadingDialog({
     super.key,
     required this.message,
     required this.onCancel,
+    this.onSkip,
   });
 
   /// The single exit. Every route out of this dialog - the button, Back, and
@@ -64,12 +66,27 @@ class LoadingDialog extends StatelessWidget {
             ],
           ),
           actions: [
+            if (onSkip != null)
+              CustomButton(
+                isPrimary: true,
+                onPressed: () {
+                  onSkip!();
+                  Navigator.of(context).pop();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(AppLocalizations.of(context)!.skip),
+                ),
+              ),
             CustomButton(
               isPrimary: false,
               // The only control in the dialog, so a D-pad has somewhere to
               // land. It also puts primary focus inside the dialog, which is
               // what lets the Escape action above be found.
-              autofocus: true,
+              autofocus: onSkip == null,
               onPressed: () => _cancel(context),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -89,11 +106,16 @@ class LoadingDialog extends StatelessWidget {
     BuildContext context, {
     required String message,
     required VoidCallback onCancel,
+    VoidCallback? onSkip,
   }) {
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => LoadingDialog(message: message, onCancel: onCancel),
+      builder: (context) => LoadingDialog(
+        message: message,
+        onCancel: onCancel,
+        onSkip: onSkip,
+      ),
     );
   }
 }
