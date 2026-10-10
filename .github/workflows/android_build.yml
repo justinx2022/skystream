@@ -1,0 +1,88 @@
+name: Android Release APKs
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.5
+
+jobs:
+  android:
+    name: Build Android Release APKs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Set Up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+
+      - name: Install Dependencies
+        run: |
+          flutter pub get
+          flutter gen-l10n
+          dart run build_runner build --delete-conflicting-outputs
+
+      # Remove desktop TorrServer binaries to reduce APK size by ~104 MB
+      - name: Strip Desktop Binaries
+        run: rm -f packages/flutter_torrent_server/assets/torrserver/TorrServer-*
+
+      - name: Generate dart-defines file
+        shell: bash
+        run: |
+          cat > dart-defines.json << 'JSON_EOF'
+          {
+            "TMDB_API_KEY": "${{ secrets.TMDB_API_KEY }}",
+            "SIMKL_CLIENT_ID": "${{ secrets.SIMKL_CLIENT_ID }}",
+            "SIMKL_CLIENT_SECRET": "${{ secrets.SIMKL_CLIENT_SECRET }}",
+            "TRAKT_CLIENT_ID": "${{ secrets.TRAKT_CLIENT_ID }}",
+            "TRAKT_CLIENT_SECRET": "${{ secrets.TRAKT_CLIENT_SECRET }}",
+            "MAL_CLIENT_ID": "${{ secrets.MAL_CLIENT_ID }}",
+            "MAL_CLIENT_SECRET": "${{ secrets.MAL_CLIENT_SECRET }}",
+            "ANILIST_CLIENT_ID": "${{ secrets.ANILIST_CLIENT_ID }}",
+            "ANIMESKIP_CLIENT_ID": "${{ secrets.ANIMESKIP_CLIENT_ID }}",
+            "OPENSUBTITLES_API_KEY": "${{ secrets.OPENSUBTITLES_API_KEY }}"
+          }
+          JSON_EOF
+
+      - name: Build Universal Release APK
+        run: flutter build apk --release --dart-define-from-file=dart-defines.json
+
+      - name: Build Split per ABI APKs
+        run: flutter build apk --release --split-per-abi --dart-define-from-file=dart-defines.json
+
+      - name: Prepare APK Outputs
+        run: |
+          mkdir -p release-apks
+          cd build/app/outputs/flutter-apk/
+          if [ -f "app-release.apk" ]; then
+            cp app-release.apk ../../../release-apks/skystream-android-universal.apk
+          fi
+          for f in app-*-release.apk; do
+            if [ -f "$f" ]; then
+              abi="${f#app-}"
+              abi="${abi%-release.apk}"
+              cp "$f" "../../../release-apks/skystream-android-${abi}.apk"
+            fi
+          done
+          ls -lh ../../../release-apks
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: SkyStream-Android-Release-APKs
+          path: release-apks/*.apk
+          retention-days: 7
