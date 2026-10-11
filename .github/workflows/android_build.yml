@@ -13,8 +13,9 @@ env:
 
 jobs:
   android:
-    name: Build Android Release APKs
+    name: Build Android Release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -61,28 +62,15 @@ jobs:
       - name: Build Universal Release APK
         run: flutter build apk --release --dart-define-from-file=dart-defines.json
 
-      - name: Build Split per ABI APKs
-        run: flutter build apk --release --split-per-abi --dart-define-from-file=dart-defines.json
-
       - name: Prepare APK Outputs
         run: |
           mkdir -p release-apks
-          cd build/app/outputs/flutter-apk/
-          if [ -f "app-release.apk" ]; then
-            cp app-release.apk ../../../release-apks/skystream-android-universal.apk
-          fi
-          for f in app-*-release.apk; do
-            if [ -f "$f" ]; then
-              abi="${f#app-}"
-              abi="${abi%-release.apk}"
-              cp "$f" "../../../release-apks/skystream-android-${abi}.apk"
-            fi
-          done
-          ls -lh ../../../release-apks
+          cp build/app/outputs/flutter-apk/app-release.apk release-apks/skystream-android-universal.apk
+          ls -lh release-apks
 
-      - name: Upload Android APKs
+      - name: Upload Android APK
         uses: actions/upload-artifact@v7
         with:
-          name: SkyStream-Android-Release-APKs
-          path: release-apks/*.apk
+          name: SkyStream-Android-Release-APK
+          path: release-apks/skystream-android-universal.apk
           retention-days: 7
