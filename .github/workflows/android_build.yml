@@ -1,4 +1,4 @@
-name: Android Release APKs
+name: Android Release APK
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FLUTTER_VERSION: 3.47.5
@@ -62,15 +62,19 @@ jobs:
       - name: Build Universal Release APK
         run: flutter build apk --release --dart-define-from-file=dart-defines.json
 
-      - name: Prepare APK Outputs
+      - name: Prepare APK Output
         run: |
           mkdir -p release-apks
           cp build/app/outputs/flutter-apk/app-release.apk release-apks/skystream-android-universal.apk
-          ls -lh release-apks
+          ls -lh release-apks/
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v7
+      - name: Publish to GitHub Releases
+        uses: ncipollo/release-action@v1
         with:
-          name: SkyStream-Android-Release-APK
-          path: release-apks/skystream-android-universal.apk
-          retention-days: 7
+          tag: "android-latest"
+          name: "SkyStream Android Latest Release"
+          body: "Universal Release APK for Android smartphones, tablets, Android TV, and Fire TV with 2m-90m buffering and auto provider health failover."
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: "release-apks/skystream-android-universal.apk"
+          token: ${{ secrets.GITHUB_TOKEN }}
