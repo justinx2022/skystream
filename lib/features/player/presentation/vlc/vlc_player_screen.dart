@@ -829,7 +829,15 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       // Present in both shipped libVLC builds (VLCKit 3.7.3 and libvlc-all
       // 3.7.0); see FORK.md section 8 on checking option names against the
       // binary.
-      options: const <String>['--http-reconnect'],
+      options: <String>[
+        '--http-reconnect',
+        if (Platform.isWindows && settings.hardwareDecoding) ...[
+          '--avcodec-hw=any',
+          '--directx-hw-yuv',
+          '--drop-late-frames',
+          '--skip-frames',
+        ],
+      ],
     );
 
     _controller.addListener(_onPlaybackValue);
@@ -1284,8 +1292,12 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
             ':live-caching=$kNetworkCachingMs',
             ':network-caching=$kNetworkCachingMs',
           ] else ...[
-            ':network-caching=1500',
-            ':http-caching=1500',
+            ':network-caching=${Platform.isWindows ? 800 : 1500}',
+            ':http-caching=${Platform.isWindows ? 800 : 1500}',
+          ],
+          if (Platform.isWindows) ...[
+            ':avcodec-hw=any',
+            ':directx-hw-yuv=1',
           ],
           if (_adaptiveMaxHeight != _deviceAdaptiveMaxHeight)
             ':adaptive-maxheight=$_adaptiveMaxHeight',
@@ -3973,12 +3985,14 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
             if (_stage == _Stage.playing)
               Offstage(
                 offstage: PlayerDiagnostics.suppressVideoSurface,
-                child: VlcPlayer(
-                  controller: _controller,
-                  fit: _fit,
-                  darwinRenderer: playerDarwinRenderer,
-                  androidRenderer: playerAndroidRenderer,
-                  backgroundColor: playerBackdropColor,
+                child: RepaintBoundary(
+                  child: VlcPlayer(
+                    controller: _controller,
+                    fit: _fit,
+                    darwinRenderer: playerDarwinRenderer,
+                    androidRenderer: playerAndroidRenderer,
+                    backgroundColor: playerBackdropColor,
+                  ),
                 ),
               ),
             // Subtitle files, drawn over the picture rather than into it, so
