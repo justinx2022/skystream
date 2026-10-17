@@ -271,6 +271,17 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
               : null;
 
           final videoUrl = historyItem.lastEpisodeUrl ?? item.url;
+          final cachedStream = historyItem.lastStreamUrl;
+          final preloaded = (cachedStream != null && cachedStream.isNotEmpty)
+              ? [
+                  StreamResult(
+                    url: cachedStream,
+                    source: item.provider ?? 'Auto',
+                    providerName: item.provider ?? 'Auto',
+                    headers: const {},
+                  ),
+                ]
+              : null;
 
           unawaited(
             PlayerRoute(
@@ -278,6 +289,7 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
                 item: item,
                 videoUrl: videoUrl,
                 episode: episode,
+                preloadedStreams: preloaded,
               ),
             ).push<void>(context),
           );

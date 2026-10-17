@@ -989,11 +989,24 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       // Applied as a start position rather than a seek, which removes the
       // question of when the engine is ready enough to seek.
       //
-      // Awaited rather than read straight off Hive: whichever device wrote
-      // last wins, so pausing on the television and picking up the phone
-      // resumes rather than restarts. The lookup falls back to the local
-      // answer on any tracker failure.
-      _initialResume = await resumeLookup;
+      // Awaited with a 300ms timeout falling back to local Hive storage,
+      // ensuring cloud sync never introduces noticeable spinner lag.
+      final localResume = resumePointFor(
+        read: _read,
+        item: widget.item,
+        episode: currentEpisode,
+        videoUrl: _videoUrl,
+      );
+      ResumePoint? resumePoint = localResume;
+      try {
+        resumePoint = await resumeLookup.timeout(
+          const Duration(milliseconds: 300),
+          onTimeout: () => localResume,
+        );
+      } catch (_) {
+        resumePoint = localResume;
+      }
+      _initialResume = resumePoint;
       if (_disposed) return;
       // From here the resume point belongs to the session rather than to the
       // stored history entry: every later attempt, failover or hand-picked,
@@ -1825,6 +1838,14 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
               : const <int>{},
         );
     if (next == null) {
+      if (_preloaded != null && _preloaded!.isNotEmpty) {
+        if (kDebugMode) {
+          debugPrint('Preloaded stream failed; falling back to fresh resolve.');
+        }
+        _preloaded = null;
+        unawaited(_start());
+        return;
+      }
       // Say what actually went wrong: a single-source channel refused for DRM
       // should name the scheme rather than just count to one.
       final total = resolved.streams.length;
@@ -2822,8 +2843,9 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     }
     // Picking the row already playing is a no-op - but in the failed stage
     // nothing is playing, and picking the candidate the ladder died on is a
-    // deliberate 'try that one again'.
-    if (index == _attemptIndex && _stage != _Stage.failed) return;
+    // deliberate 'try that one again'. Similarly if frames have not rendered
+    // yet (_sawFrames is false), allow re-triggering the open rather than ignoring.
+    if (index == _attemptIndex && _stage != _Stage.failed && _sawFrames) return;
     if (_resolved == null) return;
     // Carry the position across, exactly as failover does, including before
     // the first sample lands.
@@ -2852,6 +2874,32 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     // row whose source fails fast reopens it again and again.
     _pickCooldown = Timer(const Duration(milliseconds: 700), () {});
     _pickSource(index, onTrial: false);
+  }
+
+  /// Forces playback to immediately jump into source 0 without waiting for
+  /// remaining probes or background delays.
+  void _diveInNow() {
+    if (_disposed || (_pickCooldown?.isActive ?? false)) return;
+    _pickCooldown = Timer(const Duration(milliseconds: 700), () {});
+    final sources = _resolved?.streams ?? _candidates;
+    if (sources.isEmpty) return;
+
+    if (_awaitingFirstOpen) {
+      setState(() => _pickedBeforeOpen = 0);
+      final pick = _pick;
+      if (pick != null && !pick.isCompleted) {
+        pick.complete(0);
+      }
+      return;
+    }
+
+    if (!_sawFrames || _stage != _Stage.playing) {
+      final at = _controller.value.isLive ? Duration.zero : _resumePosition;
+      _revertTo = null;
+      _tried.clear();
+      _attemptRetries = 0;
+      unawaited(_openAttempt(0, startAt: at));
+    }
   }
 
   /// Switches playback to another file inside the season-pack torrent.
@@ -3670,9 +3718,15 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     final boosterEnabled =
         _read(playerSettingsProvider).asData?.value.multiConnectionBooster ??
         true;
-    if (boosterEnabled ||
-        looksLikeHls(uri) ||
-        unsupportedVlcHeaders(headers).isNotEmpty) {
+    // Only route through local proxy if:
+    // 1. Headers contain fields that libVLC 3.x cannot pass natively (cookie, auth, etc.)
+    // 2. OR it's an HLS stream (.m3u8) AND multi-connection speed booster is enabled.
+    // Direct video streams (mp4, mkv, webm) should ALWAYS go directly to libVLC
+    // to preserve CDN Range requests, TLS handshake, and maximize throughput.
+    final needsProxyForHeaders = unsupportedVlcHeaders(headers).isNotEmpty;
+    final needsProxyForBooster = boosterEnabled && looksLikeHls(uri);
+
+    if (needsProxyForHeaders || needsProxyForBooster) {
       return _proxied(uri, headers);
     }
     return uri;
@@ -4208,6 +4262,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   /// spent by the time this screen is reachable.
   void _retry() {
     if (_disposed) return;
+    _preloaded = null;
     _tried.clear();
     _revertTo = null;
     _attemptRetries = 0;
@@ -4284,9 +4339,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       onSkipSource: hasCurrent && (current + 1) < sources.length
           ? () => _pickFromStartup(current + 1)
           : null,
-      onDiveIn: !failed && sources.isNotEmpty && (_awaitingFirstOpen || (current != null && current != 0))
-          ? () => _pickFromStartup(0)
-          : null,
+      onDiveIn: !failed && sources.isNotEmpty ? _diveInNow : null,
       onBack: _handleBack,
       onRetry: _retry,
       // Desktop only, like the gesture over the video it mirrors: a phone or
