@@ -1,10 +1,12 @@
 name: Windows Release Installer
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   FLUTTER_VERSION: 3.47.5
@@ -70,11 +72,15 @@ jobs:
         run: |
           Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "skystream-windows-x64-custom.zip"
 
-      - name: Upload Windows Installer & Release ZIP
-        uses: actions/upload-artifact@v7
+      - name: Publish to GitHub Releases
+        uses: ncipollo/release-action@v1
         with:
-          name: SkyStream-Windows-Release-Installer
-          path: |
+          tag: "windows-latest"
+          name: "SkyStream Windows Latest Release"
+          body: "Windows 64-bit installer and portable ZIP with Stremio pulsating loader, 2m-90m buffering, and fast dive-in."
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: |
             windows/packaging/exe/Output/*.exe
             skystream-windows-x64-custom.zip
-          retention-days: 7
+          token: ${{ secrets.GITHUB_TOKEN }}
