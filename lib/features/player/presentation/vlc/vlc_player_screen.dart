@@ -3663,7 +3663,12 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   /// set on the real request and across redirects.
   Future<Uri> _deliverableUri(Uri uri, Map<String, String> headers) async {
     if (!uri.scheme.startsWith('http')) return uri;
-    if (looksLikeHls(uri) || unsupportedVlcHeaders(headers).isNotEmpty) {
+    final boosterEnabled =
+        _read(playerSettingsProvider).asData?.value.multiConnectionBooster ??
+        true;
+    if (boosterEnabled ||
+        looksLikeHls(uri) ||
+        unsupportedVlcHeaders(headers).isNotEmpty) {
       return _proxied(uri, headers);
     }
     return uri;
@@ -4284,6 +4289,8 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       // a television has no window to full-screen.
       onDoubleClick: _fullscreenAvailable ? _toggleFullscreen : null,
       isTv: isTv,
+      stremioTheme:
+          _read(playerSettingsProvider).asData?.value.stremioLoadScreen ?? true,
     );
   }
 

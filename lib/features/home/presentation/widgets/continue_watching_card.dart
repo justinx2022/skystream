@@ -23,6 +23,7 @@ import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:skystream/core/services/notification_service.dart';
 
 import '../../../../shared/focus/app_focus.dart';
+import '../../../settings/presentation/player_settings_provider.dart';
 
 class ContinueWatchingCard extends ConsumerStatefulWidget {
   final HistoryItem historyItem;
@@ -246,6 +247,38 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
                   ? 'movie'
                   : 'series',
               id: item.url,
+            ).push<void>(context),
+          );
+          return;
+        }
+
+        final playerSettings = ref.read(playerSettingsProvider).asData?.value;
+        final seamless = playerSettings?.seamlessPlayback ?? true;
+
+        if (seamless) {
+          final historyItem = widget.historyItem;
+          final episode = (historyItem.lastEpisodeUrl != null)
+              ? Episode(
+                  name: historyItem.episodeTitle ??
+                      (historyItem.episode != null
+                          ? 'Episode ${historyItem.episode}'
+                          : item.title),
+                  url: historyItem.lastEpisodeUrl!,
+                  season: historyItem.season,
+                  episode: historyItem.episode,
+                  posterUrl: historyItem.episodePosterUrl,
+                )
+              : null;
+
+          final videoUrl = historyItem.lastEpisodeUrl ?? item.url;
+
+          unawaited(
+            PlayerRoute(
+              $extra: PlayerRouteExtra(
+                item: item,
+                videoUrl: videoUrl,
+                episode: episode,
+              ),
             ).push<void>(context),
           );
           return;

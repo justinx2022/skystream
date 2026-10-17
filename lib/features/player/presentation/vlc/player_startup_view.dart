@@ -69,6 +69,7 @@ class PlayerStartupView extends StatefulWidget {
     this.onDiveIn,
     this.onDoubleClick,
     this.isTv = false,
+    this.stremioTheme = true,
   });
 
   /// The title's own name - the film, or the series an episode belongs to.
@@ -116,6 +117,7 @@ class PlayerStartupView extends StatefulWidget {
   final VoidCallback? onDoubleClick;
 
   final bool isTv;
+  final bool stremioTheme;
 
   /// Identifies row [index], for tests and for anything that has to find a row
   /// on screen.
@@ -256,7 +258,8 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
     final sourceName = widget.sourceName;
     final status = widget.status;
     final reason = widget.reason;
-    final hasDiveIn = !widget.failed && widget.onDiveIn != null;
+    final hasDiveIn =
+        widget.stremioTheme && !widget.failed && widget.onDiveIn != null;
     final hasSkip =
         !widget.failed && attempt != null && widget.onSkipSource != null;
 
@@ -286,48 +289,62 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   ),
                 ),
               const SizedBox(height: 16),
-              AnimatedBuilder(
-                animation: _pulseAnimation,
-                builder: (context, child) {
-                  final pulse = _pulseAnimation.value;
-                  final theme = Theme.of(context);
-                  final glowColor = theme.colorScheme.primary;
-                  return Opacity(
-                    opacity: widget.failed ? 1.0 : pulse,
-                    child: Transform.scale(
-                      scale: widget.failed ? 1.0 : (0.985 + 0.03 * pulse),
-                      child: Text(
-                        widget.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: widget.isTv ? 24 : 20,
-                          fontWeight: FontWeight.w700,
-                          height: 1.15,
-                          shadows: widget.failed
-                              ? null
-                              : [
-                                  Shadow(
-                                    color: glowColor.withValues(
-                                      alpha: 0.45 * pulse,
+              if (widget.stremioTheme)
+                AnimatedBuilder(
+                  animation: _pulseAnimation,
+                  builder: (context, child) {
+                    final pulse = _pulseAnimation.value;
+                    final theme = Theme.of(context);
+                    final glowColor = theme.colorScheme.primary;
+                    return Opacity(
+                      opacity: widget.failed ? 1.0 : pulse,
+                      child: Transform.scale(
+                        scale: widget.failed ? 1.0 : (0.985 + 0.03 * pulse),
+                        child: Text(
+                          widget.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: widget.isTv ? 24 : 20,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                            shadows: widget.failed
+                                ? null
+                                : [
+                                    Shadow(
+                                      color: glowColor.withValues(
+                                        alpha: 0.45 * pulse,
+                                      ),
+                                      blurRadius: 18 * pulse,
                                     ),
-                                    blurRadius: 18 * pulse,
-                                  ),
-                                  Shadow(
-                                    color: Colors.white.withValues(
-                                      alpha: 0.25 * pulse,
+                                    Shadow(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.25 * pulse,
+                                      ),
+                                      blurRadius: 8 * pulse,
                                     ),
-                                    blurRadius: 8 * pulse,
-                                  ),
-                                ],
+                                  ],
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                )
+              else
+                Text(
+                  widget.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: widget.isTv ? 24 : 20,
+                    fontWeight: FontWeight.w600,
+                    height: 1.15,
+                  ),
+                ),
               if (episodeLine != null && episodeLine.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
@@ -342,7 +359,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   ),
                 ),
               ],
-              if (!widget.failed) ...[
+              if (widget.stremioTheme && !widget.failed) ...[
                 const SizedBox(height: 16),
                 _StremioProgressBar(
                   pulseAnimation: _pulseAnimation,

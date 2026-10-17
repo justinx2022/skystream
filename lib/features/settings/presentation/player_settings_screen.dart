@@ -72,6 +72,78 @@ class PlayerSettingsScreen extends ConsumerWidget {
             ).copyWith(bottom: LayoutConstants.shellBottomContentPadding(context)),
             children: [
               SettingsGroup(
+                title: 'Speed & Playback Enhancements',
+                children: [
+                  SettingsTile(
+                    icon: Icons.flash_on_rounded,
+                    title: 'Multi-Connection Speed Booster',
+                    subtitle: playerSettings.multiConnectionBooster
+                        ? 'Parallel segment prefetching active (Debrid-like saturation)'
+                        : 'Disabled (single stream download)',
+                    trailing: Switch(
+                      value: playerSettings.multiConnectionBooster,
+                      onChanged: (val) => ref
+                          .read(playerSettingsProvider.notifier)
+                          .setMultiConnectionBooster(val),
+                    ),
+                    onTap: () => ref
+                        .read(playerSettingsProvider.notifier)
+                        .setMultiConnectionBooster(
+                          !playerSettings.multiConnectionBooster,
+                        ),
+                  ),
+                  SettingsTile(
+                    icon: Icons.movie_filter_rounded,
+                    title: 'Seamless One-Click Play (Netflix Style)',
+                    subtitle: playerSettings.seamlessPlayback
+                        ? 'Dives into playback immediately from Continue Watching'
+                        : 'Opens details screen and provider selector first',
+                    trailing: Switch(
+                      value: playerSettings.seamlessPlayback,
+                      onChanged: (val) => ref
+                          .read(playerSettingsProvider.notifier)
+                          .setSeamlessPlayback(val),
+                    ),
+                    onTap: () => ref
+                        .read(playerSettingsProvider.notifier)
+                        .setSeamlessPlayback(!playerSettings.seamlessPlayback),
+                  ),
+                  SettingsTile(
+                    icon: Icons.blur_on_rounded,
+                    title: 'Stremio-style Loading Screen',
+                    subtitle: playerSettings.stremioLoadScreen
+                        ? 'Pulsating title, poster backdrop & Dive In button'
+                        : 'Classic minimal spinner',
+                    trailing: Switch(
+                      value: playerSettings.stremioLoadScreen,
+                      onChanged: (val) => ref
+                          .read(playerSettingsProvider.notifier)
+                          .setStremioLoadScreen(val),
+                    ),
+                    onTap: () => ref
+                        .read(playerSettingsProvider.notifier)
+                        .setStremioLoadScreen(!playerSettings.stremioLoadScreen),
+                  ),
+                  SettingsTile(
+                    icon: Icons.sync_rounded,
+                    title: 'Local Network Watch Sync',
+                    subtitle: playerSettings.lanSync
+                        ? 'Auto-syncs watch progress across PC, TV & phone on home Wi-Fi'
+                        : 'Disabled',
+                    isLast: true,
+                    trailing: Switch(
+                      value: playerSettings.lanSync,
+                      onChanged: (val) =>
+                          ref.read(playerSettingsProvider.notifier).setLanSync(val),
+                    ),
+                    onTap: () => ref
+                        .read(playerSettingsProvider.notifier)
+                        .setLanSync(!playerSettings.lanSync),
+                  ),
+                ],
+              ),
+              const SizedBox(height: LayoutConstants.spacingLg),
+              SettingsGroup(
                 title: l10n.player,
                 children: [
                   SettingsTile(

@@ -26,12 +26,15 @@ class LanSyncService {
   Timer? _broadcastTimer;
   bool _started = false;
 
+  /// Whether local network sync is enabled. Controlled via Settings.
+  bool enabled = true;
+
   late final String _deviceId =
       'device_${DateTime.now().millisecondsSinceEpoch}_${Platform.operatingSystem}';
 
   /// Starts the LAN discovery and sync service.
   Future<void> start(StorageService storageService) async {
-    if (_started) return;
+    if (!enabled || _started) return;
     _storageService = storageService;
     _storageService?.onProgressSaved = notifyProgressSaved;
     _started = true;
@@ -54,7 +57,7 @@ class LanSyncService {
 
   /// Broadcasts an announcement to the local network that this device has fresh progress.
   void broadcastSyncPing() {
-    if (_udpSocket == null) return;
+    if (!enabled || _udpSocket == null) return;
     try {
       final payload = jsonEncode({
         'app': 'skystream',
@@ -160,6 +163,7 @@ class LanSyncService {
   }
 
   void _handleIncomingDatagram(Datagram datagram) {
+    if (!enabled) return;
     try {
       final raw = utf8.decode(datagram.data);
       final dynamic json = jsonDecode(raw);

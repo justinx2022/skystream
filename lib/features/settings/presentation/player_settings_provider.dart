@@ -9,6 +9,8 @@ import '../../../core/storage/storage_service.dart'
 import '../../player/domain/network_buffer.dart';
 import '../../player/data/subtitle_providers.dart';
 import '../../../core/network/dio_client_provider.dart';
+import '../../../core/services/segment_prefetch_manager.dart';
+import '../../../core/services/lan_sync_service.dart';
 
 part 'player_settings_provider.g.dart';
 
@@ -160,6 +162,18 @@ class PlayerSettings {
   final bool showPlaybackSpeed;
   final bool showEpisodes;
 
+  /// Whether the multi-connection segment prefetch booster is active.
+  final bool multiConnectionBooster;
+
+  /// Whether the Stremio-style pulsating load screen and Dive In button are active.
+  final bool stremioLoadScreen;
+
+  /// Whether tapping Continue Watching plays immediately without intermediate provider sheets.
+  final bool seamlessPlayback;
+
+  /// Whether local network Wi-Fi watch progress sync is active.
+  final bool lanSync;
+
   // Subtitle Accounts
   final String osUsername;
   final String osPassword;
@@ -195,6 +209,10 @@ class PlayerSettings {
     this.showResize = true,
     this.showPlaybackSpeed = true,
     this.showEpisodes = true,
+    this.multiConnectionBooster = true,
+    this.stremioLoadScreen = true,
+    this.seamlessPlayback = true,
+    this.lanSync = true,
     this.osUsername = '',
     this.osPassword = '',
     this.osApiKey = '',
@@ -231,6 +249,10 @@ class PlayerSettings {
     bool? showResize,
     bool? showPlaybackSpeed,
     bool? showEpisodes,
+    bool? multiConnectionBooster,
+    bool? stremioLoadScreen,
+    bool? seamlessPlayback,
+    bool? lanSync,
     String? osUsername,
     String? osPassword,
     String? osApiKey,
@@ -271,6 +293,11 @@ class PlayerSettings {
       showResize: showResize ?? this.showResize,
       showPlaybackSpeed: showPlaybackSpeed ?? this.showPlaybackSpeed,
       showEpisodes: showEpisodes ?? this.showEpisodes,
+      multiConnectionBooster:
+          multiConnectionBooster ?? this.multiConnectionBooster,
+      stremioLoadScreen: stremioLoadScreen ?? this.stremioLoadScreen,
+      seamlessPlayback: seamlessPlayback ?? this.seamlessPlayback,
+      lanSync: lanSync ?? this.lanSync,
       osUsername: osUsername ?? this.osUsername,
       osPassword: osPassword ?? this.osPassword,
       osApiKey: osApiKey ?? this.osApiKey,
@@ -444,6 +471,34 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
         storage.getPlayerSetting<int>('player_max_volume', defaultValue: 200) ??
         200;
 
+    final booster =
+        storage.getPlayerSetting<bool>(
+          'player_multi_connection_booster',
+          defaultValue: true,
+        ) ??
+        true;
+    final stremioScreen =
+        storage.getPlayerSetting<bool>(
+          'player_stremio_load_screen',
+          defaultValue: true,
+        ) ??
+        true;
+    final seamless =
+        storage.getPlayerSetting<bool>(
+          'player_seamless_playback',
+          defaultValue: true,
+        ) ??
+        true;
+    final lan =
+        storage.getPlayerSetting<bool>(
+          'lan_sync_enabled',
+          defaultValue: true,
+        ) ??
+        true;
+
+    SegmentPrefetchManager.instance.enabled = booster;
+    LanSyncService.instance.enabled = lan;
+
     _loadAccountPasswords();
 
     return PlayerSettings(
@@ -472,6 +527,10 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       showResize: showResize,
       showPlaybackSpeed: showPlaybackSpeed,
       showEpisodes: showEpisodes,
+      multiConnectionBooster: booster,
+      stremioLoadScreen: stremioScreen,
+      seamlessPlayback: seamless,
+      lanSync: lan,
       osUsername: osUser,
       osApiKey: osKey,
       subdlEmail: dlEmail,
@@ -806,6 +865,33 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     final dio = ref.read(dioClientProvider);
     final provider = SubSourceProvider(dio, apiKey: key);
     return await provider.verifyKey();
+  }
+
+  Future<void> setMultiConnectionBooster(bool enabled) async {
+    await _repository.setPlayerSetting('player_multi_connection_booster', enabled);
+    SegmentPrefetchManager.instance.enabled = enabled;
+    _update((PlayerSettings c) => c.copyWith(multiConnectionBooster: enabled));
+  }
+
+  Future<void> setStremioLoadScreen(bool enabled) async {
+    await _repository.setPlayerSetting('player_stremio_load_screen', enabled);
+    _update((PlayerSettings c) => c.copyWith(stremioLoadScreen: enabled));
+  }
+
+  Future<void> setSeamlessPlayback(bool enabled) async {
+    await _repository.setPlayerSetting('player_seamless_playback', enabled);
+    _update((PlayerSettings c) => c.copyWith(seamlessPlayback: enabled));
+  }
+
+  Future<void> setLanSync(bool enabled) async {
+    await _repository.setPlayerSetting('lan_sync_enabled', enabled);
+    LanSyncService.instance.enabled = enabled;
+    if (!enabled) {
+      LanSyncService.instance.stop();
+    } else {
+      unawaited(LanSyncService.instance.start(ref.read(storageServiceProvider)));
+    }
+    _update((PlayerSettings c) => c.copyWith(lanSync: enabled));
   }
 
   PlayerGesture _parse(String s) {

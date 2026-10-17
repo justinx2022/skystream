@@ -31,6 +31,9 @@ class SegmentPrefetchManager {
   static final SegmentPrefetchManager _instance = SegmentPrefetchManager._();
   static SegmentPrefetchManager get instance => _instance;
 
+  /// Whether the parallel segment prefetcher is enabled. Controlled via Settings.
+  bool enabled = true;
+
   static const int _maxCachedSegments = 16;
   static const int _prefetchAheadCount = 4;
   static const int _maxSessions = 4;
@@ -40,6 +43,14 @@ class SegmentPrefetchManager {
   final Map<String, Completer<CachedSegment?>> _inFlight = {};
   final List<String> _cacheKeysOrder = [];
 
+  static String _norm(String u) {
+    try {
+      return Uri.decodeFull(u).split('#')[0];
+    } catch (_) {
+      return u;
+    }
+  }
+
   /// Registers an M3U8 playlist with its ordered segment URLs.
   void registerPlaylist({
     required String playlistUrl,
@@ -48,7 +59,7 @@ class SegmentPrefetchManager {
     required Map<String, String> stickyHeaders,
     ProxyOptions? options,
   }) {
-    if (segments.isEmpty) return;
+    if (!enabled || segments.isEmpty) return;
 
     // Prune oldest session if exceeding limit
     if (_sessions.length >= _maxSessions && !_sessions.containsKey(playlistUrl)) {
@@ -73,21 +84,22 @@ class SegmentPrefetchManager {
   }
 
   /// Whether a segment is already available in the in-memory cache.
-  bool hasCached(String segmentUrl) => _cache.containsKey(segmentUrl);
+  bool hasCached(String segmentUrl) => enabled && _cache.containsKey(_norm(segmentUrl));
 
   /// Retrieves a prefetched segment from the in-memory cache.
-  CachedSegment? getCached(String segmentUrl) => _cache[segmentUrl];
+  CachedSegment? getCached(String segmentUrl) => enabled ? _cache[_norm(segmentUrl)] : null;
 
   /// Whether a segment prefetch task is currently in flight.
-  bool isInFlight(String segmentUrl) => _inFlight.containsKey(segmentUrl);
+  bool isInFlight(String segmentUrl) => enabled && _inFlight.containsKey(_norm(segmentUrl));
 
   /// Awaits the in-flight prefetch task for [segmentUrl].
   Future<CachedSegment?> awaitInFlight(String segmentUrl) {
-    final completer = _inFlight[segmentUrl];
+    final key = _norm(segmentUrl);
+    final completer = _inFlight[key];
     if (completer != null) {
       return completer.future;
     }
-    return Future.value(_cache[segmentUrl]);
+    return Future.value(_cache[key]);
   }
 
   /// Triggered whenever VLC or the player requests a segment.
@@ -98,12 +110,15 @@ class SegmentPrefetchManager {
     String segmentUrl,
     HttpClient Function({required bool autoUncompress}) clientFor,
   ) {
+    if (!enabled) return;
+
     // 1. Locate the playlist session containing this segment
     _HlsPrefetchSession? matchedSession;
     int segmentIndex = -1;
+    final normReq = _norm(segmentUrl);
 
     for (final session in _sessions.values) {
-      final idx = session.segments.indexOf(segmentUrl);
+      final idx = session.segments.indexWhere((s) => _norm(s) == normReq);
       if (idx != -1) {
         matchedSession = session;
         segmentIndex = idx;
@@ -123,7 +138,8 @@ class SegmentPrefetchManager {
     final client = clientFor(autoUncompress: false);
     for (int i = startIndex; i < endIndex; i++) {
       final nextUrl = matchedSession.segments[i];
-      if (!_cache.containsKey(nextUrl) && !_inFlight.containsKey(nextUrl)) {
+      final normNext = _norm(nextUrl);
+      if (!_cache.containsKey(normNext) && !_inFlight.containsKey(normNext)) {
         unawaited(_triggerPrefetch(
           url: nextUrl,
           session: matchedSession,
@@ -141,8 +157,9 @@ class SegmentPrefetchManager {
     required _HlsPrefetchSession session,
     required HttpClient client,
   }) async {
+    final normKey = _norm(url);
     final completer = Completer<CachedSegment?>();
-    _inFlight[url] = completer;
+    _inFlight[normKey] = completer;
 
     try {
       final req = await client.getUrl(Uri.parse(url));
@@ -215,7 +232,7 @@ class SegmentPrefetchManager {
           statusCode: res.statusCode,
         );
 
-        _putCache(url, cached);
+        _putCache(normKey, cached);
         completer.complete(cached);
         if (kDebugMode) {
           debugPrint(
@@ -231,7 +248,7 @@ class SegmentPrefetchManager {
       }
       completer.complete(null);
     } finally {
-      _inFlight.remove(url);
+      _inFlight.remove(normKey);
     }
   }
 
