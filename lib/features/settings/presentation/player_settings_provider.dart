@@ -889,7 +889,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     if (!enabled) {
       LanSyncService.instance.stop();
     } else {
-      unawaited(LanSyncService.instance.start(ref.read(storageServiceProvider)));
+      unawaited(LanSyncService.instance.start());
     }
     _update((PlayerSettings c) => c.copyWith(lanSync: enabled));
   }

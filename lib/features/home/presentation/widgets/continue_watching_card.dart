@@ -264,8 +264,8 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
                           ? 'Episode ${historyItem.episode}'
                           : item.title),
                   url: historyItem.lastEpisodeUrl!,
-                  season: historyItem.season,
-                  episode: historyItem.episode,
+                  season: historyItem.season ?? 0,
+                  episode: historyItem.episode ?? 0,
                   posterUrl: historyItem.episodePosterUrl,
                 )
               : null;

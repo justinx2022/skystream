@@ -33,9 +33,12 @@ class LanSyncService {
       'device_${DateTime.now().millisecondsSinceEpoch}_${Platform.operatingSystem}';
 
   /// Starts the LAN discovery and sync service.
-  Future<void> start(StorageService storageService) async {
+  Future<void> start([StorageService? storageService]) async {
     if (!enabled || _started) return;
-    _storageService = storageService;
+    if (storageService != null) {
+      _storageService = storageService;
+    }
+    if (_storageService == null) return;
     _storageService?.onProgressSaved = notifyProgressSaved;
     _started = true;
 
