@@ -70,6 +70,7 @@ class PlayerStartupView extends StatefulWidget {
     this.onDoubleClick,
     this.isTv = false,
     this.stremioTheme = true,
+    this.seamlessMode = true,
   });
 
   /// The title's own name - the film, or the series an episode belongs to.
@@ -118,6 +119,7 @@ class PlayerStartupView extends StatefulWidget {
 
   final bool isTv;
   final bool stremioTheme;
+  final bool seamlessMode;
 
   /// Identifies row [index], for tests and for anything that has to find a row
   /// on screen.
@@ -263,6 +265,8 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
     final hasSkip =
         !widget.failed && attempt != null && widget.onSkipSource != null;
 
+    final showDetails = !widget.seamlessMode || widget.failed;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -366,7 +370,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   attempt: attempt,
                 ),
               ],
-              if (sourceName != null && sourceName.isNotEmpty) ...[
+              if (showDetails && sourceName != null && sourceName.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 // One line: a plugin's name for a link can run to a
                 // paragraph, and this column has no room to give on a phone.
@@ -381,7 +385,9 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   ),
                 ),
               ],
-              if (status != null && status.isNotEmpty) ...[
+              if ((showDetails || (status != null && status.toLowerCase().contains('torrent'))) &&
+                  status != null &&
+                  status.isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Text(
                   status,
@@ -395,7 +401,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   ),
                 ),
               ],
-              if (reason != null && reason.isNotEmpty) ...[
+              if (showDetails && reason != null && reason.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
                   reason,
@@ -405,14 +411,14 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
                   style: const TextStyle(color: Colors.white38, fontSize: 13),
                 ),
               ],
-              if (attempt != null) ...[
+              if (showDetails && attempt != null) ...[
                 const SizedBox(height: 12),
                 _Pill(text: l10n.sourceAttempt(attempt.index, attempt.total)),
               ],
             ],
           ),
         ),
-        if (hasDiveIn || hasSkip) ...[
+        if (showDetails && (hasDiveIn || hasSkip)) ...[
           const SizedBox(height: 16),
           Wrap(
             alignment: WrapAlignment.center,
@@ -477,7 +483,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
             ),
           ),
         ],
-        if (widget.rows.isNotEmpty) ...[
+        if (showDetails && widget.rows.isNotEmpty) ...[
           const SizedBox(height: 18),
           Flexible(
             child: _SourceList(

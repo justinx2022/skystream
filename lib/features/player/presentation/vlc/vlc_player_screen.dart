@@ -944,11 +944,16 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       // Plugin resolution is a network round trip and can be the longest part
       // of startup. The view narrates it from what [_onCandidates] and
       // [_onProbe] record, and a row picked during the probe race ends it.
+      final seamless =
+          _read(playerSettingsProvider).asData?.value.seamlessPlayback ?? true;
       final resolved = await resolvePlayback(
         read: _read,
         item: widget.item,
         videoUrl: _videoUrl,
         preloadedStreams: _preloaded,
+        probeCandidates: seamless ? 1 : 3,
+        probeBudget:
+            seamless ? const Duration(milliseconds: 1200) : kProbeBudget,
         isCancelled: () => _disposed,
         onCandidates: (streams) => _onCandidates(generation, streams),
         onProbe: (index, outcome) => _onProbe(generation, index, outcome),
@@ -1266,9 +1271,8 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
             ':live-caching=$kNetworkCachingMs',
             ':network-caching=$kNetworkCachingMs',
           ] else ...[
-            ':network-caching=${math.min(_bufferMb * 1000, 30000)}',
-            ':http-caching=${math.min(_bufferMb * 1000, 60000)}',
-            ':prefetch-buffer-size=${_bufferMb * 1024}',
+            ':network-caching=1500',
+            ':http-caching=1500',
           ],
           if (_adaptiveMaxHeight != _deviceAdaptiveMaxHeight)
             ':adaptive-maxheight=$_adaptiveMaxHeight',
@@ -4291,6 +4295,8 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       isTv: isTv,
       stremioTheme:
           _read(playerSettingsProvider).asData?.value.stremioLoadScreen ?? true,
+      seamlessMode:
+          _read(playerSettingsProvider).asData?.value.seamlessPlayback ?? true,
     );
   }
 
