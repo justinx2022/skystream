@@ -1,0 +1,289 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import '../network/http_defaults.dart';
+import 'local_proxy_service.dart';
+
+/// In-memory cached media segment prefetched from upstream CDN.
+class CachedSegment {
+  final Uint8List bytes;
+  final Map<String, String> headers;
+  final int statusCode;
+
+  CachedSegment({
+    required this.bytes,
+    required this.headers,
+    this.statusCode = HttpStatus.ok,
+  });
+}
+
+/// Multi-Connection HLS Segment Prefetcher & Speed Booster.
+///
+/// Accelerates HLS and VOD streams to Debrid-like saturation by prefetching
+/// upcoming segments in parallel using a pool of persistent HTTP connections.
+/// When the video player requests segment N, segments N+1 through N+4 are
+/// fetched ahead into an in-memory sliding cache, resulting in 0ms local delivery
+/// and eliminating buffering or buffer meter drops.
+class SegmentPrefetchManager {
+  SegmentPrefetchManager._();
+
+  static final SegmentPrefetchManager _instance = SegmentPrefetchManager._();
+  static SegmentPrefetchManager get instance => _instance;
+
+  static const int _maxCachedSegments = 16;
+  static const int _prefetchAheadCount = 4;
+  static const int _maxSessions = 4;
+
+  final Map<String, _HlsPrefetchSession> _sessions = {};
+  final Map<String, CachedSegment> _cache = {};
+  final Map<String, Completer<CachedSegment?>> _inFlight = {};
+  final List<String> _cacheKeysOrder = [];
+
+  /// Registers an M3U8 playlist with its ordered segment URLs.
+  void registerPlaylist({
+    required String playlistUrl,
+    required List<String> segments,
+    required bool isVod,
+    required Map<String, String> stickyHeaders,
+    ProxyOptions? options,
+  }) {
+    if (segments.isEmpty) return;
+
+    // Prune oldest session if exceeding limit
+    if (_sessions.length >= _maxSessions && !_sessions.containsKey(playlistUrl)) {
+      final oldestKey = _sessions.keys.first;
+      _sessions.remove(oldestKey);
+    }
+
+    _sessions[playlistUrl] = _HlsPrefetchSession(
+      playlistUrl: playlistUrl,
+      segments: List.unmodifiable(segments),
+      isVod: isVod,
+      stickyHeaders: Map.unmodifiable(stickyHeaders),
+      options: options,
+      lastActive: DateTime.now(),
+    );
+
+    if (kDebugMode) {
+      debugPrint(
+        '[PREFETCH-BOOSTER] Registered playlist with ${segments.length} segments (isVod: $isVod)',
+      );
+    }
+  }
+
+  /// Whether a segment is already available in the in-memory cache.
+  bool hasCached(String segmentUrl) => _cache.containsKey(segmentUrl);
+
+  /// Retrieves a prefetched segment from the in-memory cache.
+  CachedSegment? getCached(String segmentUrl) => _cache[segmentUrl];
+
+  /// Whether a segment prefetch task is currently in flight.
+  bool isInFlight(String segmentUrl) => _inFlight.containsKey(segmentUrl);
+
+  /// Awaits the in-flight prefetch task for [segmentUrl].
+  Future<CachedSegment?> awaitInFlight(String segmentUrl) {
+    final completer = _inFlight[segmentUrl];
+    if (completer != null) {
+      return completer.future;
+    }
+    return Future.value(_cache[segmentUrl]);
+  }
+
+  /// Triggered whenever VLC or the player requests a segment.
+  ///
+  /// Kicks off parallel prefetching for the next [_prefetchAheadCount] segments
+  /// in the playlist session.
+  void onSegmentRequested(
+    String segmentUrl,
+    HttpClient Function({required bool autoUncompress}) clientFor,
+  ) {
+    // 1. Locate the playlist session containing this segment
+    _HlsPrefetchSession? matchedSession;
+    int segmentIndex = -1;
+
+    for (final session in _sessions.values) {
+      final idx = session.segments.indexOf(segmentUrl);
+      if (idx != -1) {
+        matchedSession = session;
+        segmentIndex = idx;
+        session.lastActive = DateTime.now();
+        break;
+      }
+    }
+
+    if (matchedSession == null || segmentIndex == -1) return;
+
+    // 2. Compute lookahead window
+    final lookAhead = matchedSession.isVod ? _prefetchAheadCount : 1;
+    final startIndex = segmentIndex + 1;
+    final endIndex = (startIndex + lookAhead).clamp(0, matchedSession.segments.length);
+
+    // 3. Trigger parallel background prefetching
+    final client = clientFor(autoUncompress: false);
+    for (int i = startIndex; i < endIndex; i++) {
+      final nextUrl = matchedSession.segments[i];
+      if (!_cache.containsKey(nextUrl) && !_inFlight.containsKey(nextUrl)) {
+        unawaited(_triggerPrefetch(
+          url: nextUrl,
+          session: matchedSession,
+          client: client,
+        ));
+      }
+    }
+
+    // 4. Prune old segments behind the playhead (keep 2 segments behind)
+    _pruneOlderThan(matchedSession, segmentIndex - 2);
+  }
+
+  Future<void> _triggerPrefetch({
+    required String url,
+    required _HlsPrefetchSession session,
+    required HttpClient client,
+  }) async {
+    final completer = Completer<CachedSegment?>();
+    _inFlight[url] = completer;
+
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+
+      // 1. Apply sticky headers (e.g. referer, auth)
+      session.stickyHeaders.forEach((name, value) {
+        final lower = name.toLowerCase();
+        if (lower != 'cookie' &&
+            lower != 'host' &&
+            lower != 'content-length' &&
+            lower != 'connection') {
+          req.headers.set(name, value);
+        }
+      });
+
+      // 2. Sanitize and apply default browser User-Agent
+      if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
+        req.headers.set(HttpHeaders.userAgentHeader, kDefaultBrowserUserAgent);
+      }
+
+      // 3. Referer
+      if (req.headers.value(HttpHeaders.refererHeader) == null) {
+        final optReferer = session.options?.referer;
+        if (optReferer != null) {
+          req.headers.set(HttpHeaders.refererHeader, optReferer);
+        } else {
+          final uri = Uri.parse(url);
+          req.headers.set(HttpHeaders.refererHeader, '${uri.scheme}://${uri.host}/');
+        }
+      }
+
+      // 4. Accept-Encoding: identity to avoid CDN Range mismatches
+      req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+
+      // 5. Cookies
+      if (session.options != null && session.options!.keepCookies.isNotEmpty) {
+        final cookies = session.stickyHeaders['cookie'] ?? '';
+        final filtered = cookies
+            .split(';')
+            .map((s) => s.trim())
+            .where((s) => session.options!.keepCookies.contains(s.split('=')[0]))
+            .join('; ');
+        if (filtered.isNotEmpty) {
+          req.headers.set(HttpHeaders.cookieHeader, filtered);
+        }
+      }
+
+      final res = await req.close();
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final builder = BytesBuilder(copy: false);
+        await for (final chunk in res) {
+          builder.add(chunk);
+        }
+        final bytes = builder.takeBytes();
+        final headers = <String, String>{};
+        res.headers.forEach((name, values) {
+          final lower = name.toLowerCase();
+          if (lower != 'content-length' &&
+              lower != 'content-encoding' &&
+              lower != 'transfer-encoding' &&
+              lower != 'access-control-allow-origin') {
+            headers[name] = values.join(', ');
+          }
+        });
+        headers[HttpHeaders.contentLengthHeader] = bytes.length.toString();
+
+        final cached = CachedSegment(
+          bytes: bytes,
+          headers: headers,
+          statusCode: res.statusCode,
+        );
+
+        _putCache(url, cached);
+        completer.complete(cached);
+        if (kDebugMode) {
+          debugPrint(
+            '[PREFETCH-BOOSTER] Prefetched segment (${bytes.length} B, HTTP ${res.statusCode}): $url',
+          );
+        }
+      } else {
+        completer.complete(null);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[PREFETCH-BOOSTER] Error prefetching $url: $e');
+      }
+      completer.complete(null);
+    } finally {
+      _inFlight.remove(url);
+    }
+  }
+
+  void _putCache(String key, CachedSegment segment) {
+    if (_cache.containsKey(key)) {
+      _cacheKeysOrder.remove(key);
+    }
+    _cache[key] = segment;
+    _cacheKeysOrder.add(key);
+
+    while (_cacheKeysOrder.length > _maxCachedSegments) {
+      final oldest = _cacheKeysOrder.removeAt(0);
+      _cache.remove(oldest);
+    }
+  }
+
+  void _pruneOlderThan(_HlsPrefetchSession session, int thresholdIndex) {
+    if (thresholdIndex <= 0) return;
+    for (int i = 0; i < thresholdIndex; i++) {
+      if (i < session.segments.length) {
+        final oldUrl = session.segments[i];
+        if (_cache.containsKey(oldUrl)) {
+          _cache.remove(oldUrl);
+          _cacheKeysOrder.remove(oldUrl);
+        }
+      }
+    }
+  }
+
+  /// Clears all prefetch state and cached segment data.
+  void clear() {
+    _cache.clear();
+    _cacheKeysOrder.clear();
+    _inFlight.clear();
+    _sessions.clear();
+  }
+}
+
+class _HlsPrefetchSession {
+  final String playlistUrl;
+  final List<String> segments;
+  final bool isVod;
+  final Map<String, String> stickyHeaders;
+  final ProxyOptions? options;
+  DateTime lastActive;
+
+  _HlsPrefetchSession({
+    required this.playlistUrl,
+    required this.segments,
+    required this.isVod,
+    required this.stickyHeaders,
+    this.options,
+    required this.lastActive,
+  });
+}

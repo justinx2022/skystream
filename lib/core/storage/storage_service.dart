@@ -488,6 +488,7 @@ class StorageService {
   // Box late initialization is handled in init()
   List<Map<String, dynamic>>? _cachedHistory;
   bool _historyCacheDirty = true;
+  VoidCallback? onProgressSaved;
 
   Future<void> initHistory() async {
     _historyBox = await _safeOpenBox(kHistoryBox);
@@ -539,6 +540,7 @@ class StorageService {
     }
 
     _historyCacheDirty = true;
+    onProgressSaved?.call();
   }
 
   Future<void> removeFromHistory(String url) async {

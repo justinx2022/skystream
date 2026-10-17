@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FLUTTER_VERSION: 3.47.5
 

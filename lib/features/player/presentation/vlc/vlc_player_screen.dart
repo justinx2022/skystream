@@ -3663,8 +3663,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   /// set on the real request and across redirects.
   Future<Uri> _deliverableUri(Uri uri, Map<String, String> headers) async {
     if (!uri.scheme.startsWith('http')) return uri;
-    if (unsupportedVlcHeaders(headers).isEmpty) return uri;
-    return _proxied(uri, headers);
+    if (looksLikeHls(uri) || unsupportedVlcHeaders(headers).isNotEmpty) {
+      return _proxied(uri, headers);
+    }
+    return uri;
   }
 
   /// Routes an encrypted DASH manifest through the decrypting proxy.

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import '../media/cenc.dart';
 import '../media/dash_manifest.dart';
 import '../network/http_defaults.dart';
+import 'segment_prefetch_manager.dart';
 
 class ProxyOptions {
   final List<String> mirrorHosts;
@@ -111,6 +112,7 @@ class LocalProxyService {
     final client = _httpClientFactory()
       ..connectionTimeout = _upstreamConnectionTimeout
       ..idleTimeout = _upstreamIdleTimeout
+      ..maxConnectionsPerHost = 12
       ..autoUncompress = autoUncompress;
     if (autoUncompress) {
       _uncompressingClient = client;
@@ -146,6 +148,7 @@ class LocalProxyService {
     _server = null;
     _serverPort = 0;
     _playlists.clear();
+    SegmentPrefetchManager.instance.clear();
     // Release the pooled keep-alive sockets too, otherwise they sit open for
     // the full idle timeout after the proxy is meant to be gone.
     final clients = [_rawClient, _uncompressingClient];
@@ -573,6 +576,28 @@ class LocalProxyService {
     // Check if this is an M3U8 request to handle Range headers and rewriting
     final isRequestM3u8 = targetUrl.toLowerCase().contains(".m3u8");
 
+    // Fast-path: Check if this segment is cached or in-flight by the speed booster
+    if (!isRequestM3u8) {
+      final prefetcher = SegmentPrefetchManager.instance;
+      CachedSegment? cached = prefetcher.getCached(targetUrl);
+      if (cached == null && prefetcher.isInFlight(targetUrl)) {
+        cached = await prefetcher.awaitInFlight(targetUrl);
+      }
+      if (cached != null) {
+        prefetcher.onSegmentRequested(targetUrl, _clientFor);
+        request.response.statusCode = cached.statusCode;
+        cached.headers.forEach((k, v) => request.response.headers.set(k, v));
+        request.response.headers.add(
+          "Access-Control-Allow-Origin",
+          "http://127.0.0.1:$_serverPort",
+        );
+        request.response.add(cached.bytes);
+        await request.response.close();
+        return;
+      }
+      prefetcher.onSegmentRequested(targetUrl, _clientFor);
+    }
+
     // Pooled, long-lived, and TLS-validating — see [_clientFor]. Content-Length
     // is stripped for M3U8 responses further down (the body is rewritten, so
     // its size changes).
@@ -955,6 +980,7 @@ class LocalProxyService {
     final content = utf8.decode(allBytes, allowMalformed: true);
     // debugPrint("[PROXY] Rewriting M3U8 content (${content.length} chars)");
     final baseUrl = Uri.parse(originalUrl);
+    final List<String> segments = [];
 
     final rewritten = content
         .split('\n')
@@ -976,7 +1002,12 @@ class LocalProxyService {
             return line;
           }
 
-          // Segment URL
+          // Segment URL: collect resolved target URL for parallel prefetcher
+          try {
+            final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
+            segments.add(target);
+          } catch (_) {}
+
           final r = _rewriteUrl(
             trimmed,
             baseUrl,
@@ -988,6 +1019,18 @@ class LocalProxyService {
           return r;
         })
         .join('\n');
+
+    if (segments.isNotEmpty) {
+      final isVod = content.contains('#EXT-X-ENDLIST') ||
+          !content.contains('#EXT-X-MEDIA-SEQUENCE');
+      SegmentPrefetchManager.instance.registerPlaylist(
+        playlistUrl: originalUrl,
+        segments: segments,
+        isVod: isVod,
+        stickyHeaders: stickyHeaders,
+        options: options,
+      );
+    }
 
     clientRequest.response.add(utf8.encode(rewritten));
     await clientRequest.response.close();
@@ -1013,6 +1056,26 @@ class LocalProxyService {
     return false;
   }
 
+  Uri _resolveSegmentUri(String uri, Uri baseUrl, ProxyOptions? options) {
+    Uri resolved = baseUrl.resolve(uri);
+
+    // Generic Mirror Security: If the resolved URL is relative (same host) OR on a mirror host
+    // and has no query, it MUST inherit the query params from the parent playlist.
+    bool isHostMatch = false;
+    if (options != null) {
+      isHostMatch = options.mirrorHosts.any(
+        (host) => resolved.host.contains(host),
+      );
+    }
+
+    if (resolved.query.isEmpty &&
+        baseUrl.query.isNotEmpty &&
+        (resolved.host == baseUrl.host || isHostMatch)) {
+      resolved = resolved.replace(query: baseUrl.query);
+    }
+    return resolved;
+  }
+
   String _rewriteUrl(
     String uri,
     Uri baseUrl,
@@ -1021,22 +1084,7 @@ class LocalProxyService {
     bool isSegment = false,
   }) {
     try {
-      Uri resolved = baseUrl.resolve(uri);
-
-      // Generic Mirror Security: If the resolved URL is relative (same host) OR on a mirror host
-      // and has no query, it MUST inherit the query params from the parent playlist.
-      bool isHostMatch = false;
-      if (options != null) {
-        isHostMatch = options.mirrorHosts.any(
-          (host) => resolved.host.contains(host),
-        );
-      }
-
-      if (resolved.query.isEmpty &&
-          baseUrl.query.isNotEmpty &&
-          (resolved.host == baseUrl.host || isHostMatch)) {
-        resolved = resolved.replace(query: baseUrl.query);
-      }
+      final resolved = _resolveSegmentUri(uri, baseUrl, options);
       final proxyUrl = getProxyUrl(
         resolved.toString(),
         headers: stickyHeaders,

@@ -32,6 +32,7 @@ import 'core/widgets/update_dialog.dart';
 import 'core/widgets/app_error_boundary.dart';
 import 'core/services/download_service.dart';
 import 'core/services/notification_service.dart';
+import 'core/services/lan_sync_service.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
@@ -138,6 +139,7 @@ class _AppRootState extends State<AppRoot> {
             if (kDebugMode) debugPrint("Error setting high refresh rate: $e");
           }),
       ]);
+      unawaited(LanSyncService.instance.start(_storageService));
 
       if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
         final alwaysOnTop = _storageService.isAlwaysOnTop();
