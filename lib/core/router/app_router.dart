@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:skystream/features/home/presentation/home_screen.dart';
@@ -12,6 +14,8 @@ import 'package:skystream/features/addons/presentation/addon_detail_screen.dart'
 import 'package:skystream/features/addons/presentation/addon_catalog_screen.dart';
 import 'package:skystream/features/settings/presentation/settings_screen.dart';
 import 'package:skystream/features/player/presentation/vlc/vlc_player_screen.dart';
+import 'package:skystream/features/player/presentation/mediakit/mediakit_player_screen.dart';
+import '../../features/settings/presentation/player_settings_provider.dart';
 import '../../features/extensions/screens/extensions_screen.dart';
 import '../../features/nuvio/presentation/nuvio_plugins_screen.dart';
 import '../../features/settings/presentation/player_settings_screen.dart';
@@ -435,11 +439,25 @@ class PlayerRoute extends GoRouteData with $PlayerRoute {
 
   @override
   Widget build(BuildContext context, GoRouterState state) {
-    return VlcPlayerScreen(
-      item: $extra.item,
-      videoUrl: $extra.videoUrl,
-      episode: $extra.episode,
-      preloadedStreams: $extra.preloadedStreams,
+    return Consumer(
+      builder: (context, ref, _) {
+        final useMediaKit = Platform.isWindows &&
+            (ref.watch(playerSettingsProvider).asData?.value.useMediaKitOnWindows ?? true);
+        if (useMediaKit) {
+          return MediaKitPlayerScreen(
+            item: $extra.item,
+            videoUrl: $extra.videoUrl,
+            episode: $extra.episode,
+            preloadedStreams: $extra.preloadedStreams,
+          );
+        }
+        return VlcPlayerScreen(
+          item: $extra.item,
+          videoUrl: $extra.videoUrl,
+          episode: $extra.episode,
+          preloadedStreams: $extra.preloadedStreams,
+        );
+      },
     );
   }
 }

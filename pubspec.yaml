@@ -80,9 +80,12 @@ dependencies:
   flutter_svg: ^2.2.3
   dpad: ^3.0.0
   shimmer: ^4.0.0
-  # The player engine.
+  # The player engines.
   vlc_player:
     path: packages/vlc_player
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_windows_video: ^1.6.0
   flutter_cache_manager: ^3.4.1
   path: ^1.9.1
   http: ^1.6.0

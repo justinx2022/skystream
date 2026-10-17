@@ -130,7 +130,7 @@ class PlayerSettingsScreen extends ConsumerWidget {
                     subtitle: playerSettings.lanSync
                         ? 'Auto-syncs watch progress across PC, TV & phone on home Wi-Fi'
                         : 'Disabled',
-                    isLast: true,
+                    isLast: !Platform.isWindows,
                     trailing: Switch(
                       value: playerSettings.lanSync,
                       onChanged: (val) =>
@@ -140,6 +140,26 @@ class PlayerSettingsScreen extends ConsumerWidget {
                         .read(playerSettingsProvider.notifier)
                         .setLanSync(!playerSettings.lanSync),
                   ),
+                  if (Platform.isWindows)
+                    SettingsTile(
+                      icon: Icons.speed_rounded,
+                      title: 'Windows GPU Engine (libmpv)',
+                      subtitle: playerSettings.useMediaKitOnWindows
+                          ? 'Zero-copy Direct3D 11 hardware rendering (media_kit)'
+                          : 'Standard libVLC engine',
+                      isLast: true,
+                      trailing: Switch(
+                        value: playerSettings.useMediaKitOnWindows,
+                        onChanged: (val) => ref
+                            .read(playerSettingsProvider.notifier)
+                            .setUseMediaKitOnWindows(val),
+                      ),
+                      onTap: () => ref
+                          .read(playerSettingsProvider.notifier)
+                          .setUseMediaKitOnWindows(
+                            !playerSettings.useMediaKitOnWindows,
+                          ),
+                    ),
                 ],
               ),
               const SizedBox(height: LayoutConstants.spacingLg),

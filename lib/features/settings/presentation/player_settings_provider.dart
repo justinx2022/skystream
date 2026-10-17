@@ -174,6 +174,9 @@ class PlayerSettings {
   /// Whether local network Wi-Fi watch progress sync is active.
   final bool lanSync;
 
+  /// Whether to use high-performance media_kit (libmpv) on Windows.
+  final bool useMediaKitOnWindows;
+
   // Subtitle Accounts
   final String osUsername;
   final String osPassword;
@@ -213,6 +216,7 @@ class PlayerSettings {
     this.stremioLoadScreen = true,
     this.seamlessPlayback = true,
     this.lanSync = true,
+    this.useMediaKitOnWindows = true,
     this.osUsername = '',
     this.osPassword = '',
     this.osApiKey = '',
@@ -253,6 +257,7 @@ class PlayerSettings {
     bool? stremioLoadScreen,
     bool? seamlessPlayback,
     bool? lanSync,
+    bool? useMediaKitOnWindows,
     String? osUsername,
     String? osPassword,
     String? osApiKey,
@@ -298,6 +303,7 @@ class PlayerSettings {
       stremioLoadScreen: stremioLoadScreen ?? this.stremioLoadScreen,
       seamlessPlayback: seamlessPlayback ?? this.seamlessPlayback,
       lanSync: lanSync ?? this.lanSync,
+      useMediaKitOnWindows: useMediaKitOnWindows ?? this.useMediaKitOnWindows,
       osUsername: osUsername ?? this.osUsername,
       osPassword: osPassword ?? this.osPassword,
       osApiKey: osApiKey ?? this.osApiKey,
@@ -495,6 +501,12 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
           defaultValue: true,
         ) ??
         true;
+    final mediaKitWin =
+        storage.getPlayerSetting<bool>(
+          'player_use_mediakit_windows',
+          defaultValue: true,
+        ) ??
+        true;
 
     SegmentPrefetchManager.instance.enabled = booster;
     LanSyncService.instance.enabled = lan;
@@ -531,6 +543,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       stremioLoadScreen: stremioScreen,
       seamlessPlayback: seamless,
       lanSync: lan,
+      useMediaKitOnWindows: mediaKitWin,
       osUsername: osUser,
       osApiKey: osKey,
       subdlEmail: dlEmail,
@@ -892,6 +905,11 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       unawaited(LanSyncService.instance.start());
     }
     _update((PlayerSettings c) => c.copyWith(lanSync: enabled));
+  }
+
+  Future<void> setUseMediaKitOnWindows(bool enabled) async {
+    await _repository.setPlayerSetting('player_use_mediakit_windows', enabled);
+    _update((PlayerSettings c) => c.copyWith(useMediaKitOnWindows: enabled));
   }
 
   PlayerGesture _parse(String s) {
