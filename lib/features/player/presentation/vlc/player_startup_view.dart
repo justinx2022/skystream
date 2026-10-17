@@ -256,6 +256,9 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
     final sourceName = widget.sourceName;
     final status = widget.status;
     final reason = widget.reason;
+    final hasDiveIn = !widget.failed && widget.onDiveIn != null;
+    final hasSkip =
+        !widget.failed && attempt != null && widget.onSkipSource != null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -392,54 +395,50 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
             ],
           ),
         ),
-        if (!widget.failed) ...[
-          final hasDiveIn = widget.onDiveIn != null;
-          final hasSkip = attempt != null && widget.onSkipSource != null;
-          if (hasDiveIn || hasSkip) ...[
-            const SizedBox(height: 16),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 12,
-              runSpacing: 10,
-              children: [
-                if (hasDiveIn)
-                  CustomButton(
-                    isPrimary: true,
-                    onPressed: widget.onDiveIn,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.play_arrow_rounded, size: 20),
-                          SizedBox(width: 6),
-                          Text('Dive In'),
-                        ],
-                      ),
+        if (hasDiveIn || hasSkip) ...[
+          const SizedBox(height: 16),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 10,
+            children: [
+              if (hasDiveIn)
+                CustomButton(
+                  isPrimary: true,
+                  onPressed: widget.onDiveIn,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.play_arrow_rounded, size: 20),
+                        SizedBox(width: 6),
+                        Text('Dive In'),
+                      ],
                     ),
                   ),
-                if (hasSkip)
-                  CustomButton(
-                    isPrimary: !hasDiveIn,
-                    onPressed: widget.onSkipSource,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.skip_next_rounded, size: 18),
-                          const SizedBox(width: 8),
-                          Text(l10n.playerSkipSource),
-                        ],
-                      ),
+                ),
+              if (hasSkip)
+                CustomButton(
+                  isPrimary: !hasDiveIn,
+                  onPressed: widget.onSkipSource,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.skip_next_rounded, size: 18),
+                        const SizedBox(width: 8),
+                        Text(l10n.playerSkipSource),
+                      ],
                     ),
                   ),
-              ],
-            ),
-          ],
+                ),
+            ],
+          ),
         ],
         if (widget.failed && widget.onRetry != null) ...[
           const SizedBox(height: 18),
