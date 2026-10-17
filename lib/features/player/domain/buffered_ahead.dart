@@ -271,16 +271,28 @@ class BufferedAheadEstimator {
 
     final consumed = demuxReadBytes - previous;
     final seconds = interval.inMicroseconds / 1e6;
-    if (consumed <= 0 || seconds <= 0) return null;
-    final bytesPerSecond = consumed / seconds;
-    if (!bytesPerSecond.isFinite || bytesPerSecond <= 0) return null;
-    if (_samplesSinceSeek >= _kSettledAfter) {
-      final steady = _steadyRate;
-      _steadyRate = steady == null
-          ? bytesPerSecond
-          : steady + (bytesPerSecond - steady) * _kRateSmoothing;
+    if (consumed < 0 || seconds <= 0) return null;
+
+    double? rate;
+    if (consumed > 0) {
+      final bytesPerSecond = consumed / seconds;
+      if (bytesPerSecond.isFinite && bytesPerSecond > 0) {
+        if (_samplesSinceSeek >= _kSettledAfter) {
+          final steady = _steadyRate;
+          _steadyRate = steady == null
+              ? bytesPerSecond
+              : steady + (bytesPerSecond - steady) * _kRateSmoothing;
+        }
+        rate = _steadyRate ?? bytesPerSecond;
+      }
+    } else if (_steadyRate != null && _steadyRate! > 0) {
+      // Steady rate is already known from previous active samples. In bursty
+      // streams (like HLS or chunked video), demuxers pause between cluster
+      // reads while decoding frames from the FIFO. Retain steady rate so the
+      // estimated buffer ahead does not collapse to null between bursts.
+      rate = _steadyRate;
     }
-    final rate = _steadyRate ?? bytesPerSecond;
+    if (rate == null || rate <= 0) return null;
 
     final pending = _pendingSkip;
     if (pending != null) {

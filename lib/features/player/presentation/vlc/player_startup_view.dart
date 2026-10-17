@@ -66,6 +66,7 @@ class PlayerStartupView extends StatefulWidget {
     this.failed = false,
     this.onRetry,
     this.onSkipSource,
+    this.onDiveIn,
     this.onDoubleClick,
     this.isTv = false,
   });
@@ -109,6 +110,7 @@ class PlayerStartupView extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback? onRetry;
   final VoidCallback? onSkipSource;
+  final VoidCallback? onDiveIn;
 
   /// Toggles full screen. Null where there is no window to full-screen.
   final VoidCallback? onDoubleClick;
@@ -123,10 +125,26 @@ class PlayerStartupView extends StatefulWidget {
   State<PlayerStartupView> createState() => _PlayerStartupViewState();
 }
 
-class _PlayerStartupViewState extends State<PlayerStartupView> {
+class _PlayerStartupViewState extends State<PlayerStartupView>
+    with SingleTickerProviderStateMixin {
   /// Retry's node, so the remote can be handed to it when the last link fails:
   /// autofocus alone does nothing while a row still holds focus.
   final FocusNode _retryFocus = FocusNode(debugLabel: 'player-startup-retry');
+
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _pulseAnimation = Tween<double>(begin: 0.65, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
 
   @override
   void didUpdateWidget(PlayerStartupView oldWidget) {
@@ -140,6 +158,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
 
   @override
   void dispose() {
+    _pulseController.dispose();
     _retryFocus.dispose();
     super.dispose();
   }
@@ -149,12 +168,7 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
     final l10n = AppLocalizations.of(context)!;
     final size = MediaQuery.sizeOf(context);
     final backdrop = widget.backdropUrl;
-    // As before the libVLC move: a phone's short side cannot give a backdrop
-    // and a centred column room to both be read.
-    final showBackdrop =
-        backdrop != null &&
-        backdrop.isNotEmpty &&
-        (widget.isTv || size.shortestSide >= 600);
+    final showBackdrop = backdrop != null && backdrop.isNotEmpty;
 
     return Stack(
       fit: StackFit.expand,
@@ -176,10 +190,20 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
             placeholder: (_, _) => const SizedBox.shrink(),
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),
-        // A paint, not a layer. No blur either: this sits over a platform
-        // view on Android, and a window-sized filter layer there is the cost
-        // the opening overlay was written to avoid.
-        if (showBackdrop) const ColoredBox(color: Color(0x80000000)),
+        if (showBackdrop)
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xB3000000),
+                  Color(0xD9000000),
+                  Color(0xF2000000),
+                ],
+              ),
+            ),
+          ),
         // Beneath everything that takes a click, never above it: a
         // double-tap recogniser holds the gesture arena after the first
         // click, so as an ancestor it would delay every row and button by the
@@ -259,26 +283,67 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
                   ),
                 ),
               const SizedBox(height: 16),
-              Text(
-                widget.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  height: 1.15,
-                ),
+              AnimatedBuilder(
+                animation: _pulseAnimation,
+                builder: (context, child) {
+                  final pulse = _pulseAnimation.value;
+                  final theme = Theme.of(context);
+                  final glowColor = theme.colorScheme.primary;
+                  return Opacity(
+                    opacity: widget.failed ? 1.0 : pulse,
+                    child: Transform.scale(
+                      scale: widget.failed ? 1.0 : (0.985 + 0.03 * pulse),
+                      child: Text(
+                        widget.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: widget.isTv ? 24 : 20,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          shadows: widget.failed
+                              ? null
+                              : [
+                                  Shadow(
+                                    color: glowColor.withValues(
+                                      alpha: 0.45 * pulse,
+                                    ),
+                                    blurRadius: 18 * pulse,
+                                  ),
+                                  Shadow(
+                                    color: Colors.white.withValues(
+                                      alpha: 0.25 * pulse,
+                                    ),
+                                    blurRadius: 8 * pulse,
+                                  ),
+                                ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
               if (episodeLine != null && episodeLine.isNotEmpty) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Text(
                   episodeLine,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+              if (!widget.failed) ...[
+                const SizedBox(height: 16),
+                _StremioProgressBar(
+                  pulseAnimation: _pulseAnimation,
+                  attempt: attempt,
                 ),
               ],
               if (sourceName != null && sourceName.isNotEmpty) ...[
@@ -327,23 +392,54 @@ class _PlayerStartupViewState extends State<PlayerStartupView> {
             ],
           ),
         ),
-        if (!widget.failed && attempt != null && widget.onSkipSource != null) ...[
-          const SizedBox(height: 14),
-          CustomButton(
-            isPrimary: false,
-            onPressed: widget.onSkipSource,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.skip_next_rounded, size: 18),
-                  const SizedBox(width: 8),
-                  Text(l10n.playerSkipSource),
-                ],
-              ),
+        if (!widget.failed) ...[
+          final hasDiveIn = widget.onDiveIn != null;
+          final hasSkip = attempt != null && widget.onSkipSource != null;
+          if (hasDiveIn || hasSkip) ...[
+            const SizedBox(height: 16),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 10,
+              children: [
+                if (hasDiveIn)
+                  CustomButton(
+                    isPrimary: true,
+                    onPressed: widget.onDiveIn,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.play_arrow_rounded, size: 20),
+                          SizedBox(width: 6),
+                          Text('Dive In'),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (hasSkip)
+                  CustomButton(
+                    isPrimary: !hasDiveIn,
+                    onPressed: widget.onSkipSource,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.skip_next_rounded, size: 18),
+                          const SizedBox(width: 8),
+                          Text(l10n.playerSkipSource),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ),
+          ],
         ],
         if (widget.failed && widget.onRetry != null) ...[
           const SizedBox(height: 18),
@@ -806,3 +902,85 @@ class _SourceRow extends StatelessWidget {
     SourcePlayState.failed => Colors.red.shade300,
   };
 }
+
+class _StremioProgressBar extends StatelessWidget {
+  const _StremioProgressBar({
+    required this.pulseAnimation,
+    this.attempt,
+  });
+
+  final Animation<double> pulseAnimation;
+  final ({int index, int total})? attempt;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primaryColor = theme.colorScheme.primary;
+
+    final double? attemptFraction = attempt != null && attempt!.total > 0
+        ? (attempt!.index / attempt!.total).clamp(0.05, 1.0)
+        : null;
+
+    return AnimatedBuilder(
+      animation: pulseAnimation,
+      builder: (context, child) {
+        final pulse = pulseAnimation.value;
+        return Container(
+          width: 260,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(2),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: attemptFraction != null
+                ? FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: attemptFraction,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            primaryColor.withValues(alpha: 0.75),
+                            primaryColor,
+                          ],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: primaryColor.withValues(alpha: 0.6 * pulse),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Positioned(
+                        left: (pulse * 260) - 80,
+                        width: 80,
+                        top: 0,
+                        bottom: 0,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                primaryColor.withValues(alpha: 0.8),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+

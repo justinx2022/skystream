@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -1261,8 +1262,14 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         // The rendition ceiling rides here only once it has been lowered from
         // the seeded value, which is already on the instance config.
         mediaOptions: <String>[
-          if (_isLive) ':live-caching=$kNetworkCachingMs',
-          if (_isLive) ':network-caching=$kNetworkCachingMs',
+          if (_isLive) ...[
+            ':live-caching=$kNetworkCachingMs',
+            ':network-caching=$kNetworkCachingMs',
+          ] else ...[
+            ':network-caching=${math.min(_bufferMb * 1000, 30000)}',
+            ':http-caching=${math.min(_bufferMb * 1000, 60000)}',
+            ':prefetch-buffer-size=${_bufferMb * 1024}',
+          ],
           if (_adaptiveMaxHeight != _deviceAdaptiveMaxHeight)
             ':adaptive-maxheight=$_adaptiveMaxHeight',
         ],
@@ -2193,7 +2200,22 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         capacityBytes: _bufferMb * 1024 * 1024,
       ),
     );
-    _bufferedFraction.value = fraction ?? 0;
+    if (fraction != null) {
+      _bufferedFraction.value = fraction;
+    } else if (value.duration > Duration.zero) {
+      // Retain the current buffer fraction during momentary sampling pauses,
+      // clamped so it never lags behind the playhead.
+      final playheadFraction =
+          (position.inMicroseconds / value.duration.inMicroseconds).clamp(
+            0.0,
+            1.0,
+          );
+      if (_bufferedFraction.value < playheadFraction) {
+        _bufferedFraction.value = playheadFraction;
+      }
+    } else {
+      _bufferedFraction.value = 0;
+    }
   }
 
   /// One `getMediaStats` round trip, and what it means.
@@ -4250,6 +4272,9 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       onPick: _pickFromStartup,
       onSkipSource: hasCurrent && (current + 1) < sources.length
           ? () => _pickFromStartup(current + 1)
+          : null,
+      onDiveIn: !failed && sources.isNotEmpty && (_awaitingFirstOpen || (current != null && current != 0))
+          ? () => _pickFromStartup(0)
           : null,
       onBack: _handleBack,
       onRetry: _retry,
