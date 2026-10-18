@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
+import '../../../details/presentation/details_controller.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/stream_resolver.dart';
@@ -46,6 +48,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
 
+  late MultimediaItem _item;
   late String _currentVideoUrl;
   Episode? _currentEpisode;
   Episode? _nextEpisodeOffer;
@@ -96,8 +99,23 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       } catch (_) {}
     }
 
+    _item = widget.item;
+    if ((_item.episodes == null || _item.episodes!.isEmpty) && widget.item.url.isNotEmpty) {
+      try {
+        final cached = ref.read(detailsControllerProvider(widget.item.url)).details.asData?.value;
+        if (cached != null && cached.episodes != null && cached.episodes!.isNotEmpty) {
+          _item = cached;
+        }
+      } catch (_) {}
+    }
+
     _currentVideoUrl = widget.videoUrl;
-    _currentEpisode = widget.episode;
+    _currentEpisode = widget.episode ??
+        _item.episodes?.firstWhereOrNull((e) {
+          final u1 = e.url.trim().replaceAll(RegExp(r'/+$'), '');
+          final u2 = widget.videoUrl.trim().replaceAll(RegExp(r'/+$'), '');
+          return e.url == widget.videoUrl || (u1.isNotEmpty && u1 == u2);
+        });
 
     _player = Player(
       configuration: PlayerConfiguration(
@@ -129,30 +147,45 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     if (_player.platform is NativePlayer) {
       final native = _player.platform as NativePlayer;
       try {
-        await native.setProperty('hwdec', 'auto-safe');
+        if (!kIsWeb && Platform.isAndroid) {
+          // Zero-copy direct hardware decoding into Android SurfaceTexture
+          await native.setProperty('hwdec', 'mediacodec');
+          await native.setProperty('scale', 'bilinear');
+          await native.setProperty('cscale', 'bilinear');
+          await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
+          // Mobile cache tuning (smooth, zero memory/bus saturation)
+          await native.setProperty('cache', 'yes');
+          await native.setProperty('cache-secs', '30');
+          await native.setProperty('demuxer-max-bytes', '33554432'); // 32 MiB
+          await native.setProperty('demuxer-max-back-bytes', '8388608'); // 8 MiB
+          await native.setProperty('demuxer-readahead-secs', '15');
+        } else if (!kIsWeb && Platform.isWindows) {
+          await native.setProperty('hwdec', 'auto-safe');
 
-        // Fast GPU Scaling & Low-Overhead Shaders (Optimized for Intel UHD & Mobile GPUs)
-        await native.setProperty('scale', 'bilinear');
-        await native.setProperty('dscale', 'bilinear');
-        await native.setProperty('cscale', 'bilinear');
-        await native.setProperty('correct-downscaling', 'no');
-        await native.setProperty('linear-downscaling', 'no');
-        await native.setProperty('sigmoid-upscaling', 'no');
+          // Fast GPU Scaling & Low-Overhead Shaders (Optimized for Intel UHD & Integrated GPUs)
+          await native.setProperty('scale', 'bilinear');
+          await native.setProperty('dscale', 'bilinear');
+          await native.setProperty('cscale', 'bilinear');
+          await native.setProperty('correct-downscaling', 'no');
+          await native.setProperty('linear-downscaling', 'no');
+          await native.setProperty('sigmoid-upscaling', 'no');
 
-        // Lightweight HDR Tone Mapping (Mobius curve, skip full-frame compute shader)
-        await native.setProperty('tone-mapping', 'mobius');
-        await native.setProperty('tone-mapping-compute-peak', 'no');
+          // Lightweight HDR Tone Mapping (Mobius curve, skip full-frame compute shader)
+          await native.setProperty('tone-mapping', 'mobius');
+          await native.setProperty('tone-mapping-compute-peak', 'no');
 
-        // Direct Decoder Rendering into surface & Smart Frame Dropping
-        await native.setProperty('vd-lavc-dr', 'yes');
-        await native.setProperty('framedrop', 'vo');
-        await native.setProperty('video-sync', 'audio');
+          // Direct Decoder Rendering into surface & Smart Frame Dropping
+          await native.setProperty('vd-lavc-dr', 'yes');
+          await native.setProperty('framedrop', 'vo');
+          await native.setProperty('video-sync', 'audio');
 
-        // Aggressive Cache & Demuxer tuning for high-speed streaming
-        await native.setProperty('cache', 'yes');
-        await native.setProperty('cache-secs', '60');
-        await native.setProperty('demuxer-max-bytes', '67108864'); // 64 MB buffer
-        await native.setProperty('demuxer-readahead-secs', '60');
+          // Desktop aggressive caching
+          await native.setProperty('cache', 'yes');
+          await native.setProperty('cache-secs', '120');
+          await native.setProperty('demuxer-max-bytes', '157286400'); // 150 MiB
+          await native.setProperty('demuxer-max-back-bytes', '52428800'); // 50 MiB
+          await native.setProperty('demuxer-readahead-secs', '60');
+        }
 
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
@@ -181,19 +214,35 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
+  Episode? get _effectiveCurrentEpisode {
+    if (_currentEpisode != null) return _currentEpisode;
+    final episodes = _item.episodes ?? widget.item.episodes;
+    if (episodes == null || episodes.isEmpty) return null;
+    final cleanVideo = _currentVideoUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final cleanWidgetVideo = widget.videoUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    return episodes.firstWhereOrNull((e) {
+      final cleanE = e.url.trim().replaceAll(RegExp(r'/+$'), '');
+      return e.url == _currentVideoUrl ||
+          e.url == widget.videoUrl ||
+          (cleanE.isNotEmpty && (cleanE == cleanVideo || cleanE == cleanWidgetVideo));
+    });
+  }
+
   Episode? get _nextEpisode {
+    final cur = _effectiveCurrentEpisode;
     final lookup = nextEpisodeFor(
-      item: widget.item,
-      current: _currentEpisode,
+      item: _item,
+      current: cur,
       videoUrl: _currentVideoUrl,
     );
     return lookup.next;
   }
 
   Episode? get _previousEpisode {
+    final cur = _effectiveCurrentEpisode;
     return previousEpisodeFor(
-      item: widget.item,
-      current: _currentEpisode,
+      item: _item,
+      current: cur,
       videoUrl: _currentVideoUrl,
     );
   }
@@ -205,7 +254,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     final next = _nextEpisode;
     if (next == null) return;
     _tracker?.finish();
-    rollForwardHistory(read: ref.read, item: widget.item, next: next);
+    rollForwardHistory(read: ref.read, item: _item, next: next);
     await _startEpisode(next);
   }
 
@@ -329,17 +378,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     });
 
     try {
+      final ep = _effectiveCurrentEpisode;
       final resumeLookup = resolveResumePoint(
         read: ref.read,
-        item: widget.item,
-        episode: _currentEpisode,
+        item: _item,
+        episode: ep,
         videoUrl: _currentVideoUrl,
       );
 
       final localResume = resumePointFor(
         read: ref.read,
-        item: widget.item,
-        episode: _currentEpisode,
+        item: _item,
+        episode: ep,
         videoUrl: _currentVideoUrl,
       );
 
@@ -355,7 +405,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
       final resolved = await resolvePlayback(
         read: ref.read,
-        item: widget.item,
+        item: _item,
         videoUrl: _currentVideoUrl,
         preloadedStreams: _currentVideoUrl == widget.videoUrl ? widget.preloadedStreams : null,
         probeCandidates: 1,
@@ -374,16 +424,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _token++;
       _recorder = PlaybackProgressRecorder(
         read: ref.read,
-        item: widget.item,
-        episode: _currentEpisode,
+        item: _item,
+        episode: ep,
         videoUrl: _currentVideoUrl,
         token: _token,
       );
 
       _tracker = PlaybackTracker(
         read: ref.read,
-        item: widget.item,
-        episode: _currentEpisode,
+        item: _item,
+        episode: ep,
         videoUrl: _currentVideoUrl,
         token: _token,
       );
@@ -904,13 +954,19 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   // Seamless / Stremio Startup Overlay
                   if (_isLoading || _error.isNotEmpty)
                     PlayerStartupView(
-                      title: widget.item.title,
+                      title: _item.title,
                       onPick: (index) => _openCandidate(index),
-                      episodeLine: _currentEpisode != null
-                          ? 'S${_currentEpisode!.season} E${_currentEpisode!.episode} - ${_currentEpisode!.name}'
+                      episodeLine: _effectiveCurrentEpisode != null
+                          ? (_effectiveCurrentEpisode!.name.isNotEmpty
+                              ? (_effectiveCurrentEpisode!.season > 0
+                                  ? 'S${_effectiveCurrentEpisode!.season} E${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}'
+                                  : 'Episode ${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}')
+                              : (_effectiveCurrentEpisode!.season > 0
+                                  ? 'Season ${_effectiveCurrentEpisode!.season} Episode ${_effectiveCurrentEpisode!.episode}'
+                                  : 'Episode ${_effectiveCurrentEpisode!.episode}'))
                           : null,
-                      logoUrl: widget.item.logoUrl,
-                      backdropUrl: widget.item.backdropImageUrl,
+                      logoUrl: _item.logoUrl,
+                      backdropUrl: _item.backdropImageUrl,
                       sourceName: _candidates.isNotEmpty
                           ? _candidates[_attemptIndex].source
                           : null,
@@ -935,7 +991,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                         title: _nextEpisodeOffer!.name,
                         season: _nextEpisodeOffer!.season,
                         episode: _nextEpisodeOffer!.episode,
-                        posterUrl: _nextEpisodeOffer!.posterUrl ?? widget.item.posterImageUrl,
+                        posterUrl: _nextEpisodeOffer!.posterUrl ?? _item.posterImageUrl,
                         rating: _nextEpisodeOffer!.rating,
                         runtime: _nextEpisodeOffer!.runtime != null
                             ? Duration(minutes: _nextEpisodeOffer!.runtime!)
@@ -968,6 +1024,17 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (_hasPreviousEpisode)
+                              IconButton(
+                                iconSize: 36,
+                                tooltip: 'Previous Episode',
+                                icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
+                                onPressed: () {
+                                  _onUserActivity();
+                                  final prev = _previousEpisode;
+                                  if (prev != null) _startEpisode(prev);
+                                },
+                              ),
                             IconButton(
                               iconSize: 36,
                               tooltip: 'Rewind 10s',
@@ -991,6 +1058,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                               icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
                               onPressed: () => _seekRelative(10),
                             ),
+                            if (_hasNextEpisode)
+                              IconButton(
+                                iconSize: 36,
+                                tooltip: 'Next Episode',
+                                icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
+                                onPressed: () {
+                                  _onUserActivity();
+                                  _advance();
+                                },
+                              ),
                           ],
                         ),
                       ),
@@ -1021,12 +1098,19 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   }
 
   Widget _buildTopBar() {
+    final ep = _effectiveCurrentEpisode;
+    final String? epText = ep != null
+        ? (ep.name.isNotEmpty
+            ? (ep.season > 0 ? 'S${ep.season} E${ep.episode} — ${ep.name}' : 'Episode ${ep.episode} — ${ep.name}')
+            : (ep.season > 0 ? 'Season ${ep.season} Episode ${ep.episode}' : 'Episode ${ep.episode}'))
+        : null;
+
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -1043,38 +1127,63 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
               icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 28),
               onPressed: _exitPlayer,
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    widget.item.title,
+                    _item.title,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (_currentEpisode != null)
+                  if (epText != null)
                     Text(
-                      'S${_currentEpisode!.season} E${_currentEpisode!.episode} — ${_currentEpisode!.name}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                      epText,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                 ],
               ),
             ),
+            if (_hasNextEpisode)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white24,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    minimumSize: const Size(0, 34),
+                  ),
+                  icon: const Icon(Icons.skip_next_rounded, size: 18),
+                  label: Text(
+                    _nextEpisode != null && _nextEpisode!.episode > 0
+                        ? 'Next (E${_nextEpisode!.episode})'
+                        : 'Next',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () {
+                    _onUserActivity();
+                    _advance();
+                  },
+                ),
+              ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: Colors.white12,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
-                Platform.isAndroid ? 'Hardware GPU (MediaCodec)' : 'Direct3D 11 GPU',
+                Platform.isAndroid ? 'MediaCodec GPU' : 'Direct3D 11 GPU',
                 style: const TextStyle(
                   color: Colors.greenAccent,
                   fontSize: 11,
@@ -1098,7 +1207,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       left: 0,
       right: 0,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
@@ -1143,93 +1252,96 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
               },
             ),
             const SizedBox(height: 4),
-            Row(
-              children: [
-                IconButton(
-                  icon: Icon(
-                    _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: 32,
-                  ),
-                  onPressed: _togglePlayPause,
-                ),
-                if (_hasPreviousEpisode)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
                   IconButton(
-                    tooltip: 'Previous Episode',
-                    icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 28),
+                    icon: Icon(
+                      _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                    onPressed: _togglePlayPause,
+                  ),
+                  if (_hasPreviousEpisode)
+                    IconButton(
+                      tooltip: 'Previous Episode',
+                      icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 28),
+                      onPressed: () {
+                        _onUserActivity();
+                        final prev = _previousEpisode;
+                        if (prev != null) _startEpisode(prev);
+                      },
+                    ),
+                  if (_hasNextEpisode)
+                    IconButton(
+                      tooltip: 'Next Episode',
+                      icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 28),
+                      onPressed: () {
+                        _onUserActivity();
+                        _advance();
+                      },
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 26),
+                    onPressed: () => _seekRelative(-10),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 26),
+                    onPressed: () => _seekRelative(10),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$posText / $durText',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                  const SizedBox(width: 16),
+                  if (_candidates.length > 1)
+                    IconButton(
+                      tooltip: 'Sources',
+                      icon: const Icon(Icons.layers_rounded, color: Colors.white, size: 24),
+                      onPressed: _showSourcesDialog,
+                    ),
+                  IconButton(
+                    tooltip: 'Audio Tracks',
+                    icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 24),
+                    onPressed: _showAudioTrackDialog,
+                  ),
+                  IconButton(
+                    tooltip: 'Subtitles',
+                    icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 24),
+                    onPressed: _showSubtitleTrackDialog,
+                  ),
+                  IconButton(
+                    tooltip: 'Fit Mode',
+                    icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white, size: 24),
+                    onPressed: _toggleFit,
+                  ),
+                  TextButton(
+                    child: Text(
+                      '${_playbackSpeed}x',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
                     onPressed: () {
                       _onUserActivity();
-                      final prev = _previousEpisode;
-                      if (prev != null) _startEpisode(prev);
+                      final speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+                      final idx = speeds.indexOf(_playbackSpeed);
+                      final next = speeds[(idx + 1) % speeds.length];
+                      setState(() => _playbackSpeed = next);
+                      _player.setRate(next);
                     },
                   ),
-                if (_hasNextEpisode)
                   IconButton(
-                    tooltip: 'Next Episode',
-                    icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 28),
-                    onPressed: () {
-                      _onUserActivity();
-                      _advance();
-                    },
+                    icon: Icon(
+                      _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                    onPressed: _toggleFullscreen,
                   ),
-                IconButton(
-                  icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 26),
-                  onPressed: () => _seekRelative(-10),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 26),
-                  onPressed: () => _seekRelative(10),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  '$posText / $durText',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13),
-                ),
-                const Spacer(),
-                if (_candidates.length > 1)
-                  IconButton(
-                    tooltip: 'Sources',
-                    icon: const Icon(Icons.layers_rounded, color: Colors.white, size: 24),
-                    onPressed: _showSourcesDialog,
-                  ),
-                IconButton(
-                  tooltip: 'Audio Tracks',
-                  icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 24),
-                  onPressed: _showAudioTrackDialog,
-                ),
-                IconButton(
-                  tooltip: 'Subtitles',
-                  icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 24),
-                  onPressed: _showSubtitleTrackDialog,
-                ),
-                IconButton(
-                  tooltip: 'Fit Mode',
-                  icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white, size: 24),
-                  onPressed: _toggleFit,
-                ),
-                TextButton(
-                  child: Text(
-                    '${_playbackSpeed}x',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () {
-                    _onUserActivity();
-                    final speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
-                    final idx = speeds.indexOf(_playbackSpeed);
-                    final next = speeds[(idx + 1) % speeds.length];
-                    setState(() => _playbackSpeed = next);
-                    _player.setRate(next);
-                  },
-                ),
-                IconButton(
-                  icon: Icon(
-                    _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  onPressed: _toggleFullscreen,
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

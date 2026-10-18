@@ -585,31 +585,52 @@ class DetailsController extends _$DetailsController {
     Episode? specificEpisode,
     String? overrideUrl,
   }) async {
+    final fullItem = state.details.asData?.value ?? details;
+    final itemToUse = (fullItem.episodes != null && fullItem.episodes!.isNotEmpty)
+        ? fullItem
+        : details;
+
     if (overrideUrl != null) {
-      await ref
-          .read(playbackLauncherProvider)
-          .play(context, overrideUrl, baseItem: details);
+      await ref.read(playbackLauncherProvider).play(
+            context,
+            overrideUrl,
+            baseItem: itemToUse,
+            detailedItem: state.details.asData?.value,
+          );
       return;
     }
 
     if (specificEpisode != null) {
-      await ref
-          .read(playbackLauncherProvider)
-          .play(context, specificEpisode.url, baseItem: details);
+      await ref.read(playbackLauncherProvider).play(
+            context,
+            specificEpisode.url,
+            baseItem: itemToUse,
+            detailedItem: state.details.asData?.value,
+            episode: specificEpisode,
+          );
       return;
     }
 
     if (state.isMovie) {
-      await ref
-          .read(playbackLauncherProvider)
-          .play(context, details.episodes!.first.url, baseItem: details);
+      final ep = itemToUse.episodes?.firstOrNull;
+      await ref.read(playbackLauncherProvider).play(
+            context,
+            ep?.url ?? itemToUse.url,
+            baseItem: itemToUse,
+            detailedItem: state.details.asData?.value,
+            episode: ep,
+          );
       return;
     }
 
     if (state.targetEpisode != null) {
-      await ref
-          .read(playbackLauncherProvider)
-          .play(context, state.targetEpisode!.url, baseItem: details);
+      await ref.read(playbackLauncherProvider).play(
+            context,
+            state.targetEpisode!.url,
+            baseItem: itemToUse,
+            detailedItem: state.details.asData?.value,
+            episode: state.targetEpisode,
+          );
       return;
     }
 
@@ -617,9 +638,13 @@ class DetailsController extends _$DetailsController {
     if (firstSeason.isNotEmpty) {
       final ep = state.seasonMap[firstSeason.first]?.first;
       if (ep != null) {
-        await ref
-            .read(playbackLauncherProvider)
-            .play(context, ep.url, baseItem: details);
+        await ref.read(playbackLauncherProvider).play(
+              context,
+              ep.url,
+              baseItem: itemToUse,
+              detailedItem: state.details.asData?.value,
+              episode: ep,
+            );
       }
     }
   }

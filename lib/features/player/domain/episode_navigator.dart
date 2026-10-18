@@ -114,8 +114,12 @@ Episode? previousEpisodeFor({
 /// would walk a different list.
 int _indexOf(List<Episode> episodes, Episode? current, String videoUrl) {
   var index = -1;
+  final cleanVideoUrl = videoUrl.trim().replaceAll(RegExp(r'/+$'), '');
   if (current != null) {
-    index = episodes.indexWhere((e) => e.url == current.url);
+    final cleanCurrentUrl = current.url.trim().replaceAll(RegExp(r'/+$'), '');
+    index = episodes.indexWhere((e) =>
+        e.url == current.url ||
+        e.url.trim().replaceAll(RegExp(r'/+$'), '') == cleanCurrentUrl);
     // A filtered list can drop the exact object the caller held, and some
     // plugins hand back a different URL for the same episode, so fall back to
     // the numbering when it is actually populated.
@@ -124,13 +128,21 @@ int _indexOf(List<Episode> episodes, Episode? current, String videoUrl) {
         (e) => e.season == current.season && e.episode == current.episode,
       );
     }
+    // Fall back to matching by episode number if season is omitted or 1
+    if (index == -1 && current.episode > 0) {
+      index = episodes.indexWhere((e) => e.episode == current.episode);
+    }
   }
   if (index == -1) {
-    index = episodes.indexWhere((e) => e.url == videoUrl);
+    index = episodes.indexWhere((e) =>
+        e.url == videoUrl ||
+        e.url.trim().replaceAll(RegExp(r'/+$'), '') == cleanVideoUrl);
   }
   return index;
 }
 
 bool _isSeries(MultimediaItem item) =>
     item.contentType == MultimediaContentType.series ||
-    item.contentType == MultimediaContentType.anime;
+    item.contentType == MultimediaContentType.anime ||
+    (item.episodes != null && item.episodes!.length > 1);
+
