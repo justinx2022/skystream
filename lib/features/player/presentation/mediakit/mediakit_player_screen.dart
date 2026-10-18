@@ -14,6 +14,8 @@ import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/stream_resolver.dart';
+import '../../domain/episode_navigator.dart';
+import '../vlc/next_episode_countdown.dart';
 import '../vlc/player_startup_view.dart';
 import '../widgets/player_stream_widgets.dart';
 
@@ -42,6 +44,11 @@ class MediaKitPlayerScreen extends ConsumerStatefulWidget {
 class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
+
+  late String _currentVideoUrl;
+  Episode? _currentEpisode;
+  Episode? _nextEpisodeOffer;
+  bool _nextEpisodeDeclined = false;
 
   final List<StreamSubscription> _subscriptions = [];
   Timer? _bufferPollTimer;
@@ -77,10 +84,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   void initState() {
     super.initState();
 
+    _currentVideoUrl = widget.videoUrl;
+    _currentEpisode = widget.episode;
+
     _player = Player(
       configuration: PlayerConfiguration(
         title: 'SkyStream Desktop',
-        bufferSize: 64 * 1024 * 1024, // 64 MB ring buffer
+        bufferSize: 128 * 1024 * 1024, // 128 MB ring buffer for 4K streams
         logLevel: MPVLogLevel.error,
       ),
     );
@@ -108,11 +118,30 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       final native = _player.platform as NativePlayer;
       try {
         await native.setProperty('hwdec', 'auto-safe');
-        // Do NOT set 'vo' directly - VideoController binds its own Direct3D render context!
+
+        // Fast GPU Scaling & Low-Overhead Shaders (Optimized for Intel UHD / Integrated GPUs)
+        await native.setProperty('scale', 'bilinear');
+        await native.setProperty('dscale', 'bilinear');
+        await native.setProperty('cscale', 'bilinear');
+        await native.setProperty('correct-downscaling', 'no');
+        await native.setProperty('linear-downscaling', 'no');
+        await native.setProperty('sigmoid-upscaling', 'no');
+
+        // Lightweight HDR Tone Mapping (Mobius curve, skip full-frame compute shader)
+        await native.setProperty('tone-mapping', 'mobius');
+        await native.setProperty('tone-mapping-compute-peak', 'no');
+
+        // Direct Decoder Rendering into D3D surface & Smart Frame Dropping
+        await native.setProperty('vd-lavc-dr', 'yes');
+        await native.setProperty('framedrop', 'vo');
+        await native.setProperty('video-sync', 'audio');
+
+        // Cache & Demuxer tuning for 4K bitrates
         await native.setProperty('cache', 'yes');
-        await native.setProperty('cache-secs', '30');
-        await native.setProperty('demuxer-max-bytes', '67108864');
-        await native.setProperty('demuxer-readahead-secs', '30');
+        await native.setProperty('cache-secs', '45');
+        await native.setProperty('demuxer-max-bytes', '104857600'); // 100 MB buffer
+        await native.setProperty('demuxer-readahead-secs', '45');
+
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
       } catch (e) {
@@ -140,12 +169,76 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
+  Episode? get _nextEpisode {
+    final lookup = nextEpisodeFor(
+      item: widget.item,
+      current: _currentEpisode,
+      videoUrl: _currentVideoUrl,
+    );
+    return lookup.next;
+  }
+
+  Episode? get _previousEpisode {
+    return previousEpisodeFor(
+      item: widget.item,
+      current: _currentEpisode,
+      videoUrl: _currentVideoUrl,
+    );
+  }
+
+  bool get _hasNextEpisode => _nextEpisode != null;
+  bool get _hasPreviousEpisode => _previousEpisode != null;
+
+  Future<void> _advance() async {
+    final next = _nextEpisode;
+    if (next == null) return;
+    _tracker?.finish();
+    rollForwardHistory(read: ref.read, item: widget.item, next: next);
+    await _startEpisode(next);
+  }
+
+  Future<void> _startEpisode(Episode next) async {
+    _recorder?.record(
+      ProgressSample(position: _position, duration: _duration, token: _token),
+      force: true,
+    );
+    _tracker?.finish();
+    _player.stop();
+
+    setState(() {
+      _currentEpisode = next;
+      _currentVideoUrl = next.url;
+      _position = Duration.zero;
+      _duration = Duration.zero;
+      _buffer = Duration.zero;
+      _isLoading = true;
+      _error = '';
+      _candidates = const [];
+      _resolved = null;
+      _attemptIndex = 0;
+      _nextEpisodeOffer = null;
+      _nextEpisodeDeclined = false;
+    });
+
+    await _startPlayback();
+  }
+
   void _listenPlayerStreams() {
     _subscriptions.add(
       _player.stream.position.listen((pos) {
         if (_disposed || !mounted) return;
         setState(() => _position = pos);
         _maybeRecordProgress(pos);
+
+        // Offer Next Episode in the final 35 seconds of the episode
+        if (_hasNextEpisode && !_nextEpisodeDeclined && _duration > const Duration(minutes: 5)) {
+          final remaining = _duration - pos;
+          if (remaining > Duration.zero && remaining <= const Duration(seconds: 35)) {
+            if (_nextEpisodeOffer == null) {
+              setState(() => _nextEpisodeOffer = _nextEpisode);
+            }
+          }
+        }
       }),
     );
 
@@ -188,6 +281,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         if (_disposed || !mounted) return;
         if (completed) {
           _recordFinalProgress();
+          if (_hasNextEpisode && !_nextEpisodeDeclined) {
+            _advance();
+          }
         }
       }),
     );
@@ -224,15 +320,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       final resumeLookup = resolveResumePoint(
         read: ref.read,
         item: widget.item,
-        episode: widget.episode,
-        videoUrl: widget.videoUrl,
+        episode: _currentEpisode,
+        videoUrl: _currentVideoUrl,
       );
 
       final localResume = resumePointFor(
         read: ref.read,
         item: widget.item,
-        episode: widget.episode,
-        videoUrl: widget.videoUrl,
+        episode: _currentEpisode,
+        videoUrl: _currentVideoUrl,
       );
 
       ResumePoint? resumePoint = localResume;
@@ -248,8 +344,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       final resolved = await resolvePlayback(
         read: ref.read,
         item: widget.item,
-        videoUrl: widget.videoUrl,
-        preloadedStreams: widget.preloadedStreams,
+        videoUrl: _currentVideoUrl,
+        preloadedStreams: _currentVideoUrl == widget.videoUrl ? widget.preloadedStreams : null,
         probeCandidates: 1,
         probeBudget: const Duration(milliseconds: 1200),
         isCancelled: () => _disposed,
@@ -267,16 +363,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _recorder = PlaybackProgressRecorder(
         read: ref.read,
         item: widget.item,
-        episode: widget.episode,
-        videoUrl: widget.videoUrl,
+        episode: _currentEpisode,
+        videoUrl: _currentVideoUrl,
         token: _token,
       );
 
       _tracker = PlaybackTracker(
         read: ref.read,
         item: widget.item,
-        episode: widget.episode,
-        videoUrl: widget.videoUrl,
+        episode: _currentEpisode,
+        videoUrl: _currentVideoUrl,
         token: _token,
       );
 
@@ -750,8 +846,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                     PlayerStartupView(
                       title: widget.item.title,
                       onPick: (index) => _openCandidate(index),
-                      episodeLine: widget.episode != null
-                          ? 'S${widget.episode!.season} E${widget.episode!.episode} - ${widget.episode!.name}'
+                      episodeLine: _currentEpisode != null
+                          ? 'S${_currentEpisode!.season} E${_currentEpisode!.episode} - ${_currentEpisode!.name}'
                           : null,
                       logoUrl: widget.item.logoUrl,
                       backdropUrl: widget.item.backdropImageUrl,
@@ -768,6 +864,36 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       onRetry: _startPlayback,
                       stremioTheme: stremioTheme,
                       seamlessMode: seamlessMode,
+                    ),
+
+                  // Up Next Episode Countdown Card
+                  if (_nextEpisodeOffer != null && !_nextEpisodeDeclined)
+                    Positioned(
+                      bottom: 90,
+                      right: 24,
+                      child: NextEpisodeCountdown(
+                        title: _nextEpisodeOffer!.name,
+                        season: _nextEpisodeOffer!.season,
+                        episode: _nextEpisodeOffer!.episode,
+                        posterUrl: _nextEpisodeOffer!.posterUrl ?? widget.item.posterImageUrl,
+                        rating: _nextEpisodeOffer!.rating,
+                        runtime: _nextEpisodeOffer!.runtime != null
+                            ? Duration(minutes: _nextEpisodeOffer!.runtime!)
+                            : null,
+                        description: _nextEpisodeOffer!.description,
+                        countdown: const Duration(seconds: 15),
+                        paused: !_playing,
+                        onPlayNext: () {
+                          setState(() => _nextEpisodeOffer = null);
+                          _advance();
+                        },
+                        onCancel: () {
+                          setState(() {
+                            _nextEpisodeOffer = null;
+                            _nextEpisodeDeclined = true;
+                          });
+                        },
+                      ),
                     ),
 
                   // Desktop Controls Layer
@@ -833,9 +959,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (widget.episode != null)
+                  if (_currentEpisode != null)
                     Text(
-                      'S${widget.episode!.season} E${widget.episode!.episode} — ${widget.episode!.name}',
+                      'S${_currentEpisode!.season} E${_currentEpisode!.episode} — ${_currentEpisode!.name}',
                       style: const TextStyle(color: Colors.white70, fontSize: 13),
                     ),
                 ],
@@ -927,6 +1053,25 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   ),
                   onPressed: _togglePlayPause,
                 ),
+                if (_hasPreviousEpisode)
+                  IconButton(
+                    tooltip: 'Previous Episode',
+                    icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 28),
+                    onPressed: () {
+                      _onUserActivity();
+                      final prev = _previousEpisode;
+                      if (prev != null) _startEpisode(prev);
+                    },
+                  ),
+                if (_hasNextEpisode)
+                  IconButton(
+                    tooltip: 'Next Episode',
+                    icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 28),
+                    onPressed: () {
+                      _onUserActivity();
+                      _advance();
+                    },
+                  ),
                 IconButton(
                   icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 26),
                   onPressed: () => _seekRelative(-10),
