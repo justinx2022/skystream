@@ -120,6 +120,8 @@ dependencies:
   flutter_volume_controller: ^2.0.2
 
 dependency_overrides:
+  # Pins image to 4.3.0 to prevent 4.11.x decodeLazy incompatibility with package:archive.
+  image: 4.3.0
   # Keeps the upstream screen_brightness_windows out of the Windows build.
   #
   # That plugin drives DDC/CI (I²C over the display link) to read and write the

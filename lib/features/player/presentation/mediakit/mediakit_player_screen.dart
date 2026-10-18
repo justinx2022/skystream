@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/playback_progress.dart';
+import '../../domain/playback_tracker.dart';
 import '../../domain/stream_resolver.dart';
 import '../vlc/player_startup_view.dart';
 
@@ -68,10 +69,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     super.initState();
 
     _player = Player(
-      configuration: const PlayerConfiguration(
+      configuration: PlayerConfiguration(
         title: 'SkyStream Desktop',
         bufferSize: 64 * 1024 * 1024, // 64 MB ring buffer
-        logLevel: LogLevel.error,
+        logLevel: MPVLogLevel.error,
       ),
     );
 
@@ -236,7 +237,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     try {
       final media = Media(
         stream.url,
-        httpHeaders: stream.headers.isNotEmpty ? stream.headers : null,
+        httpHeaders: (stream.headers != null && stream.headers!.isNotEmpty)
+            ? stream.headers
+            : null,
         start: startAt > Duration.zero ? startAt : null,
       );
 
@@ -270,10 +273,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _lastProgressSave = now;
       final dur = _duration;
       if (dur > Duration.zero) {
-        final sample = PlaybackSample(
+        final sample = ProgressSample(
           position: pos,
           duration: dur,
-          isLive: false,
+          token: _token,
         );
         final streams = _resolved?.streams ?? _candidates;
         final currentUrl = streams.isNotEmpty ? streams[_attemptIndex].url : null;
@@ -286,15 +289,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   void _recordFinalProgress() {
     final dur = _duration;
     if (dur > Duration.zero) {
-      final sample = PlaybackSample(
+      final sample = ProgressSample(
         position: _position,
         duration: dur,
-        isLive: false,
+        token: _token,
       );
       final streams = _resolved?.streams ?? _candidates;
       final currentUrl = streams.isNotEmpty ? streams[_attemptIndex].url : null;
       _recorder?.record(sample, lastStreamUrl: currentUrl, force: true);
-      _tracker?.onCompleted(dur);
+      _tracker?.finish();
     }
   }
 
@@ -342,6 +345,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _disposed = true;
     _hideControlsTimer?.cancel();
     _recordFinalProgress();
+    _tracker?.finish();
     _player.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -406,6 +410,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                 if (_isLoading || _error.isNotEmpty)
                   PlayerStartupView(
                     title: widget.item.title,
+                    onPick: (index) => _openCandidate(index),
                     episodeLine: widget.episode != null
                         ? 'S${widget.episode!.season} E${widget.episode!.episode} - ${widget.episode!.name}'
                         : null,
