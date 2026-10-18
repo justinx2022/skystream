@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
+import '../../../../core/network/http_defaults.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
@@ -43,6 +44,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   bool _disposed = false;
   bool _isLoading = true;
+  bool _isBuffering = false;
   String _error = '';
   List<StreamResult> _candidates = const [];
   ResolvedPlayback? _resolved;
@@ -56,6 +58,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   Timer? _hideControlsTimer;
   double _playbackSpeed = 1.0;
   bool _isFullscreen = false;
+  BoxFit _fit = BoxFit.contain;
 
   PlaybackProgressRecorder? _recorder;
   PlaybackTracker? _tracker;
@@ -94,10 +97,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       final native = _player.platform as NativePlayer;
       try {
         await native.setProperty('hwdec', 'auto-safe');
-        await native.setProperty('vo', 'gpu-next');
+        // Do NOT set 'vo' directly - VideoController binds its own Direct3D render context!
         await native.setProperty('demuxer-max-bytes', '67108864');
         await native.setProperty('demuxer-readahead-secs', '15');
         await native.setProperty('audio-pitch-correction', 'yes');
+        await native.setProperty('user-agent', kDefaultBrowserUserAgent);
       } catch (e) {
         if (kDebugMode) debugPrint('[MediaKit] Error configuring mpv properties: $e');
       }
@@ -125,14 +129,21 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (_disposed || !mounted) return;
       setState(() {
         _playing = isPlaying;
-        if (isPlaying) _isLoading = false;
+        if (isPlaying) {
+          _isLoading = false;
+          _isBuffering = false;
+        }
       });
+    });
+
+    _player.stream.buffering.listen((isBuffering) {
+      if (_disposed || !mounted) return;
+      setState(() => _isBuffering = isBuffering);
     });
 
     _player.stream.completed.listen((completed) {
       if (_disposed || !mounted) return;
       if (completed) {
-        // Auto-save completion
         _recordFinalProgress();
       }
     });
@@ -235,15 +246,25 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     final stream = streams[index];
 
     try {
+      final playable = await playableUrlFor(read: ref.read, stream: stream) ?? stream.url;
+      final headers = playbackHeaders(stream);
+
+      if (_player.platform is NativePlayer) {
+        final native = _player.platform as NativePlayer;
+        final referer = headers['Referer'] ?? headers['referer'];
+        if (referer != null && referer.isNotEmpty) {
+          await native.setProperty('referrer', referer);
+        }
+      }
+
       final media = Media(
-        stream.url,
-        httpHeaders: (stream.headers != null && stream.headers!.isNotEmpty)
-            ? stream.headers
-            : null,
+        playable,
+        httpHeaders: headers,
         start: startAt > Duration.zero ? startAt : null,
       );
 
-      await _player.open(media);
+      await _player.open(media, play: true);
+      await _player.play();
       if (_disposed || !mounted) return;
 
       setState(() => _isLoading = false);
@@ -340,6 +361,211 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
+  void _toggleFit() {
+    _onUserActivity();
+    setState(() {
+      if (_fit == BoxFit.contain) {
+        _fit = BoxFit.cover;
+      } else if (_fit == BoxFit.cover) {
+        _fit = BoxFit.fill;
+      } else {
+        _fit = BoxFit.contain;
+      }
+    });
+  }
+
+  void _showAudioTrackDialog() {
+    _onUserActivity();
+    final audioTracks = _player.state.tracks.audio;
+    final current = _player.state.track.audio;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Audio Tracks',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (audioTracks.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Default Audio', style: TextStyle(color: Colors.white70)),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: audioTracks.length,
+                    itemBuilder: (context, i) {
+                      final t = audioTracks[i];
+                      final isSelected = t.id == current.id;
+                      final label = t.title ?? t.language ?? 'Audio Track ${i + 1}';
+                      return ListTile(
+                        leading: Icon(
+                          isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                          color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
+                        ),
+                        title: Text(label, style: const TextStyle(color: Colors.white)),
+                        onTap: () {
+                          _player.setAudioTrack(t);
+                          Navigator.pop(context);
+                        },
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSubtitleTrackDialog() {
+    _onUserActivity();
+    final subTracks = _player.state.tracks.subtitle;
+    final current = _player.state.track.subtitle;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Subtitles',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: Icon(
+                  current.id == 'no' || current.id == null
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked,
+                  color: current.id == 'no' || current.id == null
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.white38,
+                ),
+                title: const Text('Off', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  _player.setSubtitleTrack(SubtitleTrack.no());
+                  Navigator.pop(context);
+                },
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: subTracks.length,
+                  itemBuilder: (context, i) {
+                    final t = subTracks[i];
+                    if (t.id == 'no') return const SizedBox.shrink();
+                    final isSelected = t.id == current.id;
+                    final label = t.title ?? t.language ?? 'Subtitle ${i + 1}';
+                    return ListTile(
+                      leading: Icon(
+                        isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
+                      ),
+                      title: Text(label, style: const TextStyle(color: Colors.white)),
+                      onTap: () {
+                        _player.setSubtitleTrack(t);
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSourcesDialog() {
+    _onUserActivity();
+    final streams = _resolved?.streams ?? _candidates;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Available Sources',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: streams.length,
+                  itemBuilder: (context, i) {
+                    final s = streams[i];
+                    final isSelected = i == _attemptIndex;
+                    return ListTile(
+                      leading: Icon(
+                        isSelected ? Icons.play_arrow_rounded : Icons.stream_rounded,
+                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
+                      ),
+                      title: Text(s.source, style: const TextStyle(color: Colors.white)),
+                      subtitle: Text(
+                        '${s.resolution ?? 'Auto'} ${s.quality != null ? '• ${s.quality}' : ''}',
+                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _openCandidate(i, startAt: _position);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -401,10 +627,23 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                 Center(
                   child: Video(
                     controller: _videoController,
-                    fit: BoxFit.contain,
+                    fit: _fit,
                     controls: NoVideoControls,
                   ),
                 ),
+
+                // Subtle Buffering Indicator
+                if (_isBuffering && !_isLoading && _error.isEmpty)
+                  const Center(
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
 
                 // Seamless / Stremio Startup Overlay
                 if (_isLoading || _error.isNotEmpty)
@@ -593,6 +832,27 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
                 const Spacer(),
+                if (_candidates.length > 1)
+                  IconButton(
+                    tooltip: 'Sources',
+                    icon: const Icon(Icons.layers_rounded, color: Colors.white, size: 24),
+                    onPressed: _showSourcesDialog,
+                  ),
+                IconButton(
+                  tooltip: 'Audio Tracks',
+                  icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 24),
+                  onPressed: _showAudioTrackDialog,
+                ),
+                IconButton(
+                  tooltip: 'Subtitles',
+                  icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 24),
+                  onPressed: _showSubtitleTrackDialog,
+                ),
+                IconButton(
+                  tooltip: 'Fit Mode',
+                  icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white, size: 24),
+                  onPressed: _toggleFit,
+                ),
                 TextButton(
                   child: Text(
                     '${_playbackSpeed}x',
