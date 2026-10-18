@@ -125,3 +125,12 @@
 # ─────────────────────────────────────────────────────────────────────────
 -dontwarn androidx.window.extensions.**
 -dontwarn androidx.window.sidecar.**
+
+# ─────────────────────────────────────────────────────────────────────────
+# media_kit / libmpv (Android JNI & MediaCodec surface)
+# ─────────────────────────────────────────────────────────────────────────
+-keep class com.alexmercerind.media_kit.** { *; }
+-keep class com.alexmercerind.media_kit_video.** { *; }
+-keep class com.alexmercerind.media_kit_libs_android_video.** { *; }
+-dontwarn com.alexmercerind.**
+

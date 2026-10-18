@@ -79,12 +79,14 @@ void main() async {
     debugPrint = (String? message, {int? wrapWidth}) {};
   }
 
+  // Initialize media_kit engine (libmpv) on Windows and Android
+  if (Platform.isWindows || Platform.isAndroid) {
+    MediaKit.ensureInitialized();
+  }
+
   // Native window init (Desktop) - Run once
   if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
     await windowManager.ensureInitialized();
-    if (Platform.isWindows) {
-      MediaKit.ensureInitialized();
-    }
 
     final windowOptions = WindowOptions(
       size: const Size(1280, 720),

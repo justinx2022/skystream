@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
@@ -84,13 +85,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   void initState() {
     super.initState();
 
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        WakelockPlus.enable();
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      } catch (_) {}
+    }
+
     _currentVideoUrl = widget.videoUrl;
     _currentEpisode = widget.episode;
 
     _player = Player(
       configuration: PlayerConfiguration(
-        title: 'SkyStream Desktop',
-        bufferSize: 128 * 1024 * 1024, // 128 MB ring buffer for 4K streams
+        title: 'SkyStream',
+        bufferSize: 64 * 1024 * 1024, // 64 MB ring buffer (fast & safe for mobile & desktop)
         logLevel: MPVLogLevel.error,
       ),
     );
@@ -119,7 +131,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       try {
         await native.setProperty('hwdec', 'auto-safe');
 
-        // Fast GPU Scaling & Low-Overhead Shaders (Optimized for Intel UHD / Integrated GPUs)
+        // Fast GPU Scaling & Low-Overhead Shaders (Optimized for Intel UHD & Mobile GPUs)
         await native.setProperty('scale', 'bilinear');
         await native.setProperty('dscale', 'bilinear');
         await native.setProperty('cscale', 'bilinear');
@@ -131,16 +143,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         await native.setProperty('tone-mapping', 'mobius');
         await native.setProperty('tone-mapping-compute-peak', 'no');
 
-        // Direct Decoder Rendering into D3D surface & Smart Frame Dropping
+        // Direct Decoder Rendering into surface & Smart Frame Dropping
         await native.setProperty('vd-lavc-dr', 'yes');
         await native.setProperty('framedrop', 'vo');
         await native.setProperty('video-sync', 'audio');
 
-        // Cache & Demuxer tuning for 4K bitrates
+        // Aggressive Cache & Demuxer tuning for high-speed streaming
         await native.setProperty('cache', 'yes');
-        await native.setProperty('cache-secs', '45');
-        await native.setProperty('demuxer-max-bytes', '104857600'); // 100 MB buffer
-        await native.setProperty('demuxer-readahead-secs', '45');
+        await native.setProperty('cache-secs', '60');
+        await native.setProperty('demuxer-max-bytes', '67108864'); // 64 MB buffer
+        await native.setProperty('demuxer-readahead-secs', '60');
 
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
@@ -486,6 +498,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     });
   }
 
+  void _toggleControlsVisibility() {
+    setState(() => _controlsVisible = !_controlsVisible);
+    if (_controlsVisible) {
+      _startControlsTimer();
+    } else {
+      _hideControlsTimer?.cancel();
+    }
+  }
+
   void _onUserActivity() {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
@@ -509,10 +530,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   Future<void> _toggleFullscreen() async {
     _onUserActivity();
-    final isFull = await windowManager.isFullScreen();
-    await windowManager.setFullScreen(!isFull);
-    if (mounted) {
-      setState(() => _isFullscreen = !isFull);
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      final isFull = await windowManager.isFullScreen();
+      await windowManager.setFullScreen(!isFull);
+      if (mounted) {
+        setState(() => _isFullscreen = !isFull);
+      }
+    } else if (!kIsWeb && Platform.isAndroid) {
+      final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+      if (isLandscape) {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      } else {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
     }
   }
 
@@ -726,15 +761,34 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
   }
 
-  Future<void> _exitPlayer() async {
+  void _cleanupPlatformOnExit() {
     _player.stop();
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    if (!kIsWeb && Platform.isAndroid) {
       try {
-        if (await windowManager.isFullScreen()) {
-          await windowManager.setFullScreen(false);
-        }
+        WakelockPlus.disable();
+        SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.manual,
+          overlays: SystemUiOverlay.values,
+        );
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
       } catch (_) {}
     }
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      try {
+        windowManager.isFullScreen().then((isFull) {
+          if (isFull) windowManager.setFullScreen(false);
+        }).catchError((_) {});
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _exitPlayer() async {
+    _cleanupPlatformOnExit();
     if (mounted) {
       Navigator.of(context).maybePop();
     }
@@ -742,7 +796,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   @override
   void deactivate() {
-    _player.stop();
+    _cleanupPlatformOnExit();
     super.deactivate();
   }
 
@@ -757,14 +811,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _subscriptions.clear();
     _recordFinalProgress();
     _tracker?.finish();
-    _player.stop();
+    _cleanupPlatformOnExit();
     _player.dispose();
     _focusNode.dispose();
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      windowManager.isFullScreen().then((isFull) {
-        if (isFull) windowManager.setFullScreen(false);
-      }).catchError((_) {});
-    }
     super.dispose();
   }
 
@@ -803,7 +852,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        _player.stop();
+        _cleanupPlatformOnExit();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -815,11 +864,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
             onHover: (_) => _onUserActivity(),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: _togglePlayPause,
-              onDoubleTap: _toggleFullscreen,
+              onTap: _toggleControlsVisibility,
+              onDoubleTapDown: (details) {
+                if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+                  _toggleFullscreen();
+                } else {
+                  final screenWidth = MediaQuery.of(context).size.width;
+                  if (details.localPosition.dx < screenWidth / 2) {
+                    _seekRelative(-10);
+                  } else {
+                    _seekRelative(10);
+                  }
+                }
+              },
               child: Stack(
                 children: [
-                  // Zero-Copy Direct3D 11 Video Texture
+                  // Video Surface (Direct3D 11 / MediaCodec GPU)
                   Center(
                     child: Video(
                       controller: _videoController,
@@ -896,7 +956,47 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       ),
                     ),
 
-                  // Desktop Controls Layer
+                  // Center Quick Action Transport Controls (Touch & Remote)
+                  if (_controlsVisible && !_isLoading && _error.isEmpty)
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(40),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              iconSize: 36,
+                              tooltip: 'Rewind 10s',
+                              icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                              onPressed: () => _seekRelative(-10),
+                            ),
+                            const SizedBox(width: 16),
+                            IconButton(
+                              iconSize: 56,
+                              tooltip: _playing ? 'Pause' : 'Play',
+                              icon: Icon(
+                                _playing ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                                color: Colors.white,
+                              ),
+                              onPressed: _togglePlayPause,
+                            ),
+                            const SizedBox(width: 16),
+                            IconButton(
+                              iconSize: 36,
+                              tooltip: 'Forward 10s',
+                              icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                              onPressed: () => _seekRelative(10),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // Player Controls Layer (Top & Bottom Bars)
                   if (!_isLoading && _error.isEmpty)
                     AnimatedOpacity(
                       opacity: _controlsVisible ? 1.0 : 0.0,
@@ -973,9 +1073,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                 color: Colors.white12,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: const Text(
-                'Direct3D 11 GPU',
-                style: TextStyle(
+              child: Text(
+                Platform.isAndroid ? 'Hardware GPU (MediaCodec)' : 'Direct3D 11 GPU',
+                style: const TextStyle(
                   color: Colors.greenAccent,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,

@@ -141,12 +141,16 @@ class PlayerSettingsScreen extends ConsumerWidget {
                         .read(playerSettingsProvider.notifier)
                         .setLanSync(!playerSettings.lanSync),
                   ),
-                  if (Platform.isWindows)
+                  if (Platform.isWindows || Platform.isAndroid)
                     SettingsTile(
                       icon: Icons.speed_rounded,
-                      title: 'Windows GPU Engine (libmpv)',
+                      title: Platform.isWindows
+                          ? 'Windows GPU Engine (libmpv)'
+                          : 'High-Performance Engine (media_kit)',
                       subtitle: playerSettings.useMediaKitOnWindows
-                          ? 'Zero-copy Direct3D 11 hardware rendering (media_kit)'
+                          ? (Platform.isWindows
+                              ? 'Zero-copy Direct3D 11 hardware rendering (media_kit)'
+                              : 'Hardware accelerated MediaCodec engine with high-speed caching')
                           : 'Standard libVLC engine',
                       isLast: true,
                       trailing: Switch(
