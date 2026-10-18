@@ -546,10 +546,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                         isSelected ? Icons.play_arrow_rounded : Icons.stream_rounded,
                         color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
                       ),
-                      title: Text(s.source, style: const TextStyle(color: Colors.white)),
-                      subtitle: Text(
-                        '${s.resolution ?? 'Auto'} ${s.quality != null ? '• ${s.quality}' : ''}',
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      title: Text(
+                        s.displaySource,
+                        style: TextStyle(
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
                       ),
                       onTap: () {
                         Navigator.pop(context);
