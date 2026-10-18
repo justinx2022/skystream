@@ -15,6 +15,7 @@ import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/stream_resolver.dart';
 import '../vlc/player_startup_view.dart';
+import '../widgets/player_stream_widgets.dart';
 
 /// High-Performance Desktop Player Engine powered by `media_kit` (libmpv).
 ///
@@ -41,6 +42,11 @@ class MediaKitPlayerScreen extends ConsumerStatefulWidget {
 class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
+
+  final List<StreamSubscription> _subscriptions = [];
+  Timer? _bufferPollTimer;
+  Duration? _dragPosition;
+  bool _isDragging = false;
 
   bool _disposed = false;
   bool _isLoading = true;
@@ -90,6 +96,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _listenPlayerStreams();
     _startPlayback();
     _startControlsTimer();
+
+    _bufferPollTimer = Timer.periodic(
+      const Duration(milliseconds: 800),
+      (_) => _updateBufferFromNative(),
+    );
   }
 
   Future<void> _applyMpvOptimizations() async {
@@ -98,8 +109,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       try {
         await native.setProperty('hwdec', 'auto-safe');
         // Do NOT set 'vo' directly - VideoController binds its own Direct3D render context!
+        await native.setProperty('cache', 'yes');
+        await native.setProperty('cache-secs', '30');
         await native.setProperty('demuxer-max-bytes', '67108864');
-        await native.setProperty('demuxer-readahead-secs', '15');
+        await native.setProperty('demuxer-readahead-secs', '30');
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
       } catch (e) {
@@ -108,51 +121,97 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
-  void _listenPlayerStreams() {
-    _player.stream.position.listen((pos) {
-      if (_disposed || !mounted) return;
-      setState(() => _position = pos);
-      _maybeRecordProgress(pos);
-    });
-
-    _player.stream.duration.listen((dur) {
-      if (_disposed || !mounted) return;
-      setState(() => _duration = dur);
-    });
-
-    _player.stream.buffer.listen((buf) {
-      if (_disposed || !mounted) return;
-      setState(() => _buffer = buf);
-    });
-
-    _player.stream.playing.listen((isPlaying) {
-      if (_disposed || !mounted) return;
-      setState(() {
-        _playing = isPlaying;
-        if (isPlaying) {
-          _isLoading = false;
-          _isBuffering = false;
+  Future<void> _updateBufferFromNative() async {
+    if (_disposed || !mounted) return;
+    if (_player.platform is NativePlayer) {
+      final native = _player.platform as NativePlayer;
+      try {
+        final cacheSecStr = await native.getProperty('demuxer-cache-time');
+        if (cacheSecStr != null) {
+          final secs = double.tryParse(cacheSecStr.toString());
+          if (secs != null && secs > 0) {
+            final cacheDur = Duration(milliseconds: (secs * 1000).toInt());
+            if (mounted && cacheDur != _buffer) {
+              setState(() => _buffer = cacheDur);
+            }
+          }
         }
-      });
-    });
+      } catch (_) {}
+    }
+  }
 
-    _player.stream.buffering.listen((isBuffering) {
-      if (_disposed || !mounted) return;
-      setState(() => _isBuffering = isBuffering);
-    });
+  void _listenPlayerStreams() {
+    _subscriptions.add(
+      _player.stream.position.listen((pos) {
+        if (_disposed || !mounted) return;
+        setState(() => _position = pos);
+        _maybeRecordProgress(pos);
+      }),
+    );
 
-    _player.stream.completed.listen((completed) {
-      if (_disposed || !mounted) return;
-      if (completed) {
-        _recordFinalProgress();
-      }
-    });
+    _subscriptions.add(
+      _player.stream.duration.listen((dur) {
+        if (_disposed || !mounted) return;
+        setState(() => _duration = dur);
+      }),
+    );
 
-    _player.stream.error.listen((err) {
-      if (_disposed || !mounted) return;
-      if (kDebugMode) debugPrint('[MediaKit] Player Error: $err');
-      _failoverNext();
-    });
+    _subscriptions.add(
+      _player.stream.buffer.listen((buf) {
+        if (_disposed || !mounted) return;
+        setState(() => _buffer = buf);
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.playing.listen((isPlaying) {
+        if (_disposed || !mounted) return;
+        setState(() {
+          _playing = isPlaying;
+          if (isPlaying) {
+            _isLoading = false;
+            _isBuffering = false;
+          }
+        });
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.buffering.listen((isBuffering) {
+        if (_disposed || !mounted) return;
+        setState(() => _isBuffering = isBuffering);
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.completed.listen((completed) {
+        if (_disposed || !mounted) return;
+        if (completed) {
+          _recordFinalProgress();
+        }
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.error.listen((err) {
+        if (_disposed || !mounted) return;
+        if (kDebugMode) debugPrint('[MediaKit] Player Error: $err');
+        _failoverNext();
+      }),
+    );
+  }
+
+  double get _bufferRatio {
+    if (_duration.inMilliseconds <= 0) return 0.0;
+    // mpv reports buffer either as forward duration ahead or absolute timestamp
+    Duration bufferedEnd = _buffer;
+    if (_buffer < _position) {
+      bufferedEnd = _position + _buffer;
+    }
+    if (bufferedEnd < _position) {
+      bufferedEnd = _position;
+    }
+    return (bufferedEnd.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
   }
 
   Future<void> _startPlayback() async {
@@ -571,14 +630,45 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
   }
 
+  Future<void> _exitPlayer() async {
+    _player.stop();
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      try {
+        if (await windowManager.isFullScreen()) {
+          await windowManager.setFullScreen(false);
+        }
+      } catch (_) {}
+    }
+    if (mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  @override
+  void deactivate() {
+    _player.stop();
+    super.deactivate();
+  }
+
   @override
   void dispose() {
     _disposed = true;
     _hideControlsTimer?.cancel();
+    _bufferPollTimer?.cancel();
+    for (final s in _subscriptions) {
+      s.cancel();
+    }
+    _subscriptions.clear();
     _recordFinalProgress();
     _tracker?.finish();
+    _player.stop();
     _player.dispose();
     _focusNode.dispose();
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      windowManager.isFullScreen().then((isFull) {
+        if (isFull) windowManager.setFullScreen(false);
+      }).catchError((_) {});
+    }
     super.dispose();
   }
 
@@ -601,7 +691,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (_isFullscreen) {
         _toggleFullscreen();
       } else {
-        Navigator.of(context).maybePop();
+        _exitPlayer();
       }
       return KeyEventResult.handled;
     }
@@ -614,83 +704,89 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     final stremioTheme = playerSettings?.stremioLoadScreen ?? true;
     final seamlessMode = playerSettings?.seamlessPlayback ?? true;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Focus(
-        focusNode: _focusNode,
-        autofocus: true,
-        onKeyEvent: _handleKeyEvent,
-        child: MouseRegion(
-          onHover: (_) => _onUserActivity(),
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _togglePlayPause,
-            onDoubleTap: _toggleFullscreen,
-            child: Stack(
-              children: [
-                // Zero-Copy Direct3D 11 Video Texture
-                Center(
-                  child: Video(
-                    controller: _videoController,
-                    fit: _fit,
-                    controls: NoVideoControls,
-                  ),
-                ),
-
-                // Subtle Buffering Indicator
-                if (_isBuffering && !_isLoading && _error.isEmpty)
-                  const Center(
-                    child: SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: Colors.white,
-                      ),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        _player.stop();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: _handleKeyEvent,
+          child: MouseRegion(
+            onHover: (_) => _onUserActivity(),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _togglePlayPause,
+              onDoubleTap: _toggleFullscreen,
+              child: Stack(
+                children: [
+                  // Zero-Copy Direct3D 11 Video Texture
+                  Center(
+                    child: Video(
+                      controller: _videoController,
+                      fit: _fit,
+                      controls: NoVideoControls,
                     ),
                   ),
 
-                // Seamless / Stremio Startup Overlay
-                if (_isLoading || _error.isNotEmpty)
-                  PlayerStartupView(
-                    title: widget.item.title,
-                    onPick: (index) => _openCandidate(index),
-                    episodeLine: widget.episode != null
-                        ? 'S${widget.episode!.season} E${widget.episode!.episode} - ${widget.episode!.name}'
-                        : null,
-                    logoUrl: widget.item.logoUrl,
-                    backdropUrl: widget.item.backdropImageUrl,
-                    sourceName: _candidates.isNotEmpty
-                        ? _candidates[_attemptIndex].source
-                        : null,
-                    status: _isLoading ? 'Loading high-performance stream…' : null,
-                    reason: _error.isNotEmpty ? _error : null,
-                    failed: _error.isNotEmpty,
-                    attempt: _candidates.isNotEmpty
-                        ? (index: _attemptIndex + 1, total: _candidates.length)
-                        : null,
-                    onBack: () => Navigator.of(context).maybePop(),
-                    onRetry: _startPlayback,
-                    stremioTheme: stremioTheme,
-                    seamlessMode: seamlessMode,
-                  ),
-
-                // Desktop Controls Layer
-                if (!_isLoading && _error.isEmpty)
-                  AnimatedOpacity(
-                    opacity: _controlsVisible ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: IgnorePointer(
-                      ignoring: !_controlsVisible,
-                      child: Stack(
-                        children: [
-                          _buildTopBar(),
-                          _buildBottomBar(),
-                        ],
+                  // Subtle Buffering Indicator
+                  if (_isBuffering && !_isLoading && _error.isEmpty)
+                    const Center(
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+
+                  // Seamless / Stremio Startup Overlay
+                  if (_isLoading || _error.isNotEmpty)
+                    PlayerStartupView(
+                      title: widget.item.title,
+                      onPick: (index) => _openCandidate(index),
+                      episodeLine: widget.episode != null
+                          ? 'S${widget.episode!.season} E${widget.episode!.episode} - ${widget.episode!.name}'
+                          : null,
+                      logoUrl: widget.item.logoUrl,
+                      backdropUrl: widget.item.backdropImageUrl,
+                      sourceName: _candidates.isNotEmpty
+                          ? _candidates[_attemptIndex].source
+                          : null,
+                      status: _isLoading ? 'Loading high-performance stream…' : null,
+                      reason: _error.isNotEmpty ? _error : null,
+                      failed: _error.isNotEmpty,
+                      attempt: _candidates.isNotEmpty
+                          ? (index: _attemptIndex + 1, total: _candidates.length)
+                          : null,
+                      onBack: _exitPlayer,
+                      onRetry: _startPlayback,
+                      stremioTheme: stremioTheme,
+                      seamlessMode: seamlessMode,
+                    ),
+
+                  // Desktop Controls Layer
+                  if (!_isLoading && _error.isEmpty)
+                    AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !_controlsVisible,
+                        child: Stack(
+                          children: [
+                            _buildTopBar(),
+                            _buildBottomBar(),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -719,7 +815,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           children: [
             IconButton(
               icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 28),
-              onPressed: () => Navigator.of(context).maybePop(),
+              onPressed: _exitPlayer,
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -767,7 +863,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   }
 
   Widget _buildBottomBar() {
-    final posText = _formatDuration(_position);
+    final displayPos = _isDragging && _dragPosition != null ? _dragPosition! : _position;
+    final posText = _formatDuration(displayPos);
     final durText = _formatDuration(_duration);
 
     return Positioned(
@@ -789,28 +886,35 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Seek bar
-            SliderTheme(
-              data: SliderThemeData(
-                trackHeight: 4,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-                activeTrackColor: Theme.of(context).colorScheme.primary,
-                inactiveTrackColor: Colors.white24,
-                thumbColor: Theme.of(context).colorScheme.primary,
-              ),
-              child: Slider(
-                value: _duration.inMilliseconds > 0
-                    ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
-                    : 0.0,
-                onChanged: (val) {
-                  _onUserActivity();
-                  final target = Duration(
-                    milliseconds: (val * _duration.inMilliseconds).toInt(),
-                  );
-                  _player.seek(target);
-                },
-              ),
+            // Seek bar with real-time buffer progress line
+            PlayerScrubber(
+              position: displayPos,
+              duration: _duration,
+              hasDuration: _duration > Duration.zero,
+              bufferRatio: _bufferRatio,
+              canSeek: _duration > Duration.zero,
+              onChangeStart: (ms) {
+                _onUserActivity();
+                setState(() {
+                  _isDragging = true;
+                  _dragPosition = Duration(milliseconds: ms.round());
+                });
+              },
+              onChanged: (ms) {
+                _onUserActivity();
+                setState(() {
+                  _dragPosition = Duration(milliseconds: ms.round());
+                });
+              },
+              onChangeEnd: (ms) {
+                _onUserActivity();
+                final target = Duration(milliseconds: ms.round());
+                setState(() {
+                  _isDragging = false;
+                  _dragPosition = null;
+                });
+                _player.seek(target);
+              },
             ),
             const SizedBox(height: 4),
             Row(
