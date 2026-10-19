@@ -195,7 +195,15 @@ class DebridService {
         if (response.statusCode == 401 || response.statusCode == 403) {
           throw const DebridException('Real-Debrid rejected that API key.');
         }
-        if (data is Map) return data['username']?.toString();
+        if (data is Map) {
+          final type = data['type']?.toString().toLowerCase();
+          if (type != null && type != 'premium') {
+            throw const DebridException(
+              'Real-Debrid account has expired or is not premium.',
+            );
+          }
+          return data['username']?.toString();
+        }
         throw const DebridException('Unexpected Real-Debrid response.');
 
       case DebridProvider.allDebrid:
@@ -207,7 +215,15 @@ class DebridService {
         final data = response.data;
         if (data is Map && data['status'] == 'success') {
           final user = (data['data'] as Map?)?['user'];
-          if (user is Map) return user['username']?.toString();
+          if (user is Map) {
+            final isPremium = user['isPremium'] as bool? ?? false;
+            if (!isPremium) {
+              throw const DebridException(
+                'AllDebrid account has expired or is not premium.',
+              );
+            }
+            return user['username']?.toString();
+          }
           return null;
         }
         throw DebridException(
@@ -217,6 +233,25 @@ class DebridService {
       case DebridProvider.none:
         return null;
     }
+  }
+
+  static bool _isAuthOrExpired(dynamic data, int? statusCode) {
+    if (statusCode == 401 || statusCode == 403) return true;
+    if (data is Map) {
+      final err =
+          (data['error'] ?? data['message'])?.toString().toLowerCase() ?? '';
+      final code = (data['error_code'] as num?)?.toInt();
+      if (code == 8 || code == 19 || code == 20) return true;
+      if (err.contains('bad_token') ||
+          err.contains('not_premium') ||
+          err.contains('must_be_premium') ||
+          err.contains('expired') ||
+          err.contains('account_locked') ||
+          err.contains('auth_bad_apikey')) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static String? _allDebridError(dynamic data) {
@@ -287,6 +322,14 @@ class DebridService {
       options: _options(headers: headers),
     );
     final addData = add.data;
+    if (add.statusCode == 401 ||
+        add.statusCode == 403 ||
+        _isAuthOrExpired(addData, add.statusCode)) {
+      unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+      throw const DebridException(
+        'Real-Debrid account has expired or API key is invalid. Debrid has been disconnected.',
+      );
+    }
     if (addData is! Map || addData['id'] == null) {
       throw const DebridException('Real-Debrid did not accept the magnet.');
     }
@@ -297,6 +340,14 @@ class DebridService {
       '$_rdBase/torrents/info/$id',
       options: _options(headers: headers),
     );
+    if (info.statusCode == 401 ||
+        info.statusCode == 403 ||
+        _isAuthOrExpired(info.data, info.statusCode)) {
+      unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+      throw const DebridException(
+        'Real-Debrid account has expired or API key is invalid. Debrid has been disconnected.',
+      );
+    }
     final files = <Map<String, dynamic>>[];
     final rawFiles = (info.data as Map?)?['files'];
     if (rawFiles is List) {
@@ -322,6 +373,14 @@ class DebridService {
         options: _options(headers: headers),
       );
       final data = poll.data;
+      if (poll.statusCode == 401 ||
+          poll.statusCode == 403 ||
+          _isAuthOrExpired(data, poll.statusCode)) {
+        unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+        throw const DebridException(
+          'Real-Debrid account has expired or API key is invalid. Debrid has been disconnected.',
+        );
+      }
       if (data is Map) {
         final status = data['status']?.toString() ?? '';
         final progress = (data['progress'] as num?)?.toDouble() ?? 0;
@@ -356,6 +415,14 @@ class DebridService {
       options: _options(headers: {'Authorization': 'Bearer $apiKey'}),
     );
     final data = response.data;
+    if (response.statusCode == 401 ||
+        response.statusCode == 403 ||
+        _isAuthOrExpired(data, response.statusCode)) {
+      unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+      throw const DebridException(
+        'Real-Debrid account has expired or API key is invalid. Debrid has been disconnected.',
+      );
+    }
     if (data is Map && data['download'] != null) {
       return DebridLink(
         url: data['download'].toString(),
@@ -382,6 +449,14 @@ class DebridService {
       options: _options(),
     );
     final uploadData = upload.data;
+    if (upload.statusCode == 401 ||
+        upload.statusCode == 403 ||
+        _isAuthOrExpired(uploadData, upload.statusCode)) {
+      unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+      throw const DebridException(
+        'AllDebrid account has expired or API key is invalid. Debrid has been disconnected.',
+      );
+    }
     if (uploadData is! Map || uploadData['status'] != 'success') {
       throw DebridException(
         _allDebridError(uploadData) ?? 'AllDebrid did not accept the magnet.',
@@ -402,6 +477,14 @@ class DebridService {
         queryParameters: {...query, 'id': magnetId},
         options: _options(),
       );
+      if (status.statusCode == 401 ||
+          status.statusCode == 403 ||
+          _isAuthOrExpired(status.data, status.statusCode)) {
+        unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+        throw const DebridException(
+          'AllDebrid account has expired or API key is invalid. Debrid has been disconnected.',
+        );
+      }
       final link = parseAllDebridReadyLink(status.data);
       if (link != null) {
         onStatus?.call('Unlocking direct link…');
@@ -411,6 +494,14 @@ class DebridService {
           options: _options(),
         );
         final data = unlock.data;
+        if (unlock.statusCode == 401 ||
+            unlock.statusCode == 403 ||
+            _isAuthOrExpired(data, unlock.statusCode)) {
+          unawaited(_ref.read(debridSettingsProvider.notifier).clear());
+          throw const DebridException(
+            'AllDebrid account has expired or API key is invalid. Debrid has been disconnected.',
+          );
+        }
         if (data is Map && data['status'] == 'success') {
           final payload = data['data'];
           if (payload is Map && payload['link'] != null) {

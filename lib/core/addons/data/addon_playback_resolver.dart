@@ -84,7 +84,9 @@ class AddonPlaybackResolver {
             if (kDebugMode) {
               debugPrint('[AddonPlaybackResolver] debrid: $error');
             }
-            onStatus?.call('Debrid unavailable — using peers…');
+            onStatus?.call(
+              'Debrid unavailable or expired — switching to peer-to-peer…',
+            );
           }
         }
 
