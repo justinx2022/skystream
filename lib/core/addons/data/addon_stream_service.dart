@@ -282,10 +282,15 @@ class AddonStreamService {
     var completed = 0;
 
     final updates = StreamController<AddonStreamProgress>();
+    final hasDebrid = _ref.read(debridSettingsProvider).isConfigured;
 
     // Best first, with links to some other film the add-on found last.
-    List<AddonStreamSource> ranked() =>
-        rankAddonStreams(streams, title: effective.title, year: effective.year);
+    List<AddonStreamSource> ranked() => rankAddonStreams(
+      streams,
+      title: effective.title,
+      year: effective.year,
+      hasActiveDebrid: hasDebrid,
+    );
 
     AddonStreamProgress snapshot({bool loading = true}) {
       return AddonStreamProgress(

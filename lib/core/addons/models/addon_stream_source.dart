@@ -497,10 +497,12 @@ class AddonStreamSource {
   /// Resolution leads, because SkyStream streams torrents natively through the
   /// bundled torrent server — unlike a browser client, a 4K torrent is not
   /// second-class here. Direct links still get a head start for instant
-  /// playback, cached debrid links more so, and CAM rips are buried.
-  int get score {
+  /// playback, cached debrid links more so when debrid is configured, and CAM rips are buried.
+  int computeScore({bool hasActiveDebrid = false}) {
     var value = 0;
-    if (isCachedDebrid) value += 70;
+    if (isCachedDebrid) {
+      value += hasActiveDebrid ? 70 : -100;
+    }
     if (isDirect) value += 45;
 
     final quality = qualityScore;
@@ -526,6 +528,8 @@ class AddonStreamSource {
     }
     return value;
   }
+
+  int get score => computeScore(hasActiveDebrid: false);
 }
 
 /// Distinct provider / add-on labels for a sources-sheet chip rail.
@@ -565,11 +569,12 @@ List<AddonStreamSource> rankAddonStreams(
   Iterable<AddonStreamSource> streams, {
   String? title,
   int? year,
+  bool hasActiveDebrid = false,
 }) {
   final ranked = streams.toList();
   final scores = Map<AddonStreamSource, int>.identity();
   for (final stream in ranked) {
-    scores[stream] = stream.score;
+    scores[stream] = stream.computeScore(hasActiveDebrid: hasActiveDebrid);
   }
 
   final suspects = Set<AddonStreamSource>.identity();
