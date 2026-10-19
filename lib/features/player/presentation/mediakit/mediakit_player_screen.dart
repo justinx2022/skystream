@@ -12,8 +12,10 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
+import '../../../../core/services/local_proxy_service.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../../details/presentation/details_controller.dart';
+import '../../domain/hls_video_length.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/stream_resolver.dart';
@@ -452,19 +454,54 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   Future<void> _openCandidate(int index, {Duration startAt = Duration.zero}) async {
     final streams = _resolved?.streams ?? _candidates;
     if (index >= streams.length) {
-      setState(() {
-        _isLoading = false;
-        _error = 'All available sources failed to play.';
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = 'All available sources failed to play.';
+        });
+      }
       return;
     }
 
     _attemptIndex = index;
     final stream = streams[index];
 
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = '';
+      });
+    }
+
     try {
-      final playable = await playableUrlFor(read: ref.read, stream: stream) ?? stream.url;
+      final playable = await playableUrlFor(read: ref.read, stream: stream)
+          .timeout(const Duration(seconds: 14), onTimeout: () => null);
+
+      if (_disposed || !mounted) return;
+
+      if (playable == null || playable.startsWith('magnet:')) {
+        throw Exception('Stream source is unavailable or unreachable');
+      }
+
       final headers = playbackHeaders(stream);
+      String finalUrl = playable;
+
+      // Enable Multi-Connection Speed Booster for direct HLS (.m3u8) streams
+      final boosterEnabled =
+          ref.read(playerSettingsProvider).asData?.value.multiConnectionBooster ??
+          true;
+      final uri = Uri.tryParse(playable);
+      if (uri != null && uri.scheme.startsWith('http')) {
+        if (looksLikeHls(uri) && boosterEnabled) {
+          try {
+            await LocalProxyService.instance.startServer();
+            finalUrl = LocalProxyService.instance.getProxyUrl(
+              playable,
+              headers: headers,
+            );
+          } catch (_) {}
+        }
+      }
 
       if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
@@ -475,7 +512,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       }
 
       final media = Media(
-        playable,
+        finalUrl,
         httpHeaders: headers,
         start: startAt > Duration.zero ? startAt : null,
       );
@@ -967,14 +1004,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                           : null,
                       logoUrl: _item.logoUrl,
                       backdropUrl: _item.backdropImageUrl,
-                      sourceName: _candidates.isNotEmpty
+                      sourceName: _candidates.isNotEmpty && _attemptIndex < _candidates.length
                           ? _candidates[_attemptIndex].source
                           : null,
-                      status: _isLoading ? 'Loading high-performance stream…' : null,
+                      status: _isLoading
+                          ? (_candidates.isNotEmpty && _attemptIndex < _candidates.length
+                              ? 'Connecting to ${_candidates[_attemptIndex].source}…'
+                              : 'Loading high-performance stream…')
+                          : null,
                       reason: _error.isNotEmpty ? _error : null,
                       failed: _error.isNotEmpty,
                       attempt: _candidates.isNotEmpty
-                          ? (index: _attemptIndex + 1, total: _candidates.length)
+                          ? (index: (_attemptIndex + 1).clamp(1, _candidates.length), total: _candidates.length)
                           : null,
                       onBack: _exitPlayer,
                       onRetry: _startPlayback,

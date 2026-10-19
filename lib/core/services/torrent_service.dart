@@ -81,30 +81,37 @@ class TorrentService {
 
   Future<void> _configureSettings() async {
     try {
-      // The cache is the viewer's own buffer setting, the same number libVLC's
-      // prefetch window gets - see applyBufferSettings. It used to be a
-      // hard-coded 64 MB, so the setting moved one engine and not the other.
-      //
-      // readerReadAHead is the share held *ahead* of the read point, which
-      // makes the remainder the only backward buffer this player has anywhere.
-      // At the 95 % this replaces there were about three megabytes behind the
-      // playhead, so a ten second step back re-downloaded pieces the reader
-      // had just finished with.
+      final token = _server.authToken;
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+      };
+
       final settings = {
-        "cacheSize": _cacheMb * 1024 * 1024,
-        "readerReadAHead": _readAheadPercent,
-        "preload": true,
+        "action": "set",
+        "sets": {
+          "CacheSize": _cacheMb * 1024 * 1024,
+          "ReaderReadAHead": _readAheadPercent,
+          "PreloadCache": 0, // 0% preload cache ensures instant start without blocking on buffer
+          "ConnectionsLimit": 100, // 100 connections for rapid peer/swarm discovery
+          "TorrentDisconnectTimeout": 30,
+          "RetrackersMode": 1,
+        }
       };
 
       final response = await http.post(
         Uri.parse("$_serverUrl/settings"),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: jsonEncode(settings),
       );
 
       if (response.statusCode == 200) {
         if (kDebugMode) {
-          debugPrint("TorrServer settings configured for streaming.");
+          debugPrint("TorrServer settings configured for instant streaming.");
+        }
+      } else {
+        if (kDebugMode) {
+          debugPrint("TorrServer settings response status: ${response.statusCode}");
         }
       }
     } catch (e) {
@@ -135,10 +142,12 @@ class TorrentService {
     try {
       final String linkToAdd = await _prepareMagnetLink(magnetLink);
 
-      // Add Torrent
-      final hash = await _server.addTorrent(linkToAdd);
+      // Add Torrent with a 12s timeout
+      final hash = await _server
+          .addTorrent(linkToAdd)
+          .timeout(const Duration(seconds: 12), onTimeout: () => null);
       if (hash == null) {
-        throw Exception("Failed to add torrent");
+        throw Exception("Failed to add torrent or timed out");
       }
       _activeTorrentHash = hash;
 
@@ -149,16 +158,18 @@ class TorrentService {
       }
 
       final int fileIndex = fileInfo['index'] as int;
+      final rawPath = fileInfo['path'] as String? ?? 'video.mp4';
+      final fileName = Uri.encodeComponent(rawPath.split(RegExp(r'[/\\]')).last);
 
-      // Construct URL
+      // Construct URL with proper filename and extension for instant container demuxing
       // Try to fetch from playlist first
       final playlistStreamUrl = await _fetchPlaylistUrl(hash, fileIndex);
       if (playlistStreamUrl != null) {
         return playlistStreamUrl;
       }
 
-      // Fallback: Use "Simplified" format
-      return "$_serverUrl/stream?link=$hash&index=$fileIndex&play";
+      // Fallback: Direct stream with filename
+      return "$_serverUrl/stream/$fileName?link=$hash&index=$fileIndex&play";
     } catch (e) {
       if (kDebugMode) debugPrint("Error generating stream URL: $e");
       return null;
@@ -180,16 +191,18 @@ class TorrentService {
 
   Future<Map<String, dynamic>?> _pollForMetadata(String hash) async {
     int attempts = 0;
-    while (attempts < 120) {
-      await Future<void>.delayed(const Duration(seconds: 1));
-      final status = await _server.getTorrentStatus(hash);
-
-      if (status != null && status['file_stats'] is List) {
-        final fileStats = status['file_stats'] as List;
-        if (fileStats.isNotEmpty) {
-          return _findSequentialVideoFile(fileStats);
+    // Check every 350ms up to 28 attempts (~10 seconds max) so dead torrents fail over fast
+    while (attempts < 28) {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      try {
+        final status = await _server.getTorrentStatus(hash);
+        if (status != null && status['file_stats'] is List) {
+          final fileStats = status['file_stats'] as List;
+          if (fileStats.isNotEmpty) {
+            return _findSequentialVideoFile(fileStats);
+          }
         }
-      }
+      } catch (_) {}
       attempts++;
     }
     return null;
@@ -272,7 +285,7 @@ class TorrentService {
 
   Future<String?> _fetchPlaylistUrl(String hash, int index) async {
     try {
-      final playlistUrl = "$_serverUrl/playlist?link=$hash";
+      final playlistUrl = "$_serverUrl/playlist?hash=$hash";
       final plResponse = await http.get(Uri.parse(playlistUrl));
 
       if (plResponse.statusCode == 200) {

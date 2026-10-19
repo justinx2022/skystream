@@ -169,7 +169,7 @@ class FlutterTorrentServerDesktop extends FlutterTorrentServerPlatform {
           'link': link,
           // 'save_path': ... let it use default
         }),
-      );
+      ).timeout(const Duration(seconds: 12));
 
       if (response.statusCode != 200) {
         throw Exception("Failed to add torrent: ${response.body}");
@@ -202,7 +202,7 @@ class FlutterTorrentServerDesktop extends FlutterTorrentServerPlatform {
         uri,
         headers: _authHeaders({'Content-Type': 'application/json'}),
         body: jsonEncode({'action': 'get', 'hash': hash}),
-      );
+      ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
