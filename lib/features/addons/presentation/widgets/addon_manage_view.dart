@@ -44,6 +44,12 @@ const List<AddonPreset> kAddonPresets = [
     icon: Icons.movie_filter_rounded,
   ),
   AddonPreset(
+    name: 'Torrentio (P2P)',
+    description: 'Direct torrent streams with TorrServer (No debrid needed)',
+    url: 'https://torrentio.strem.fun/manifest.json',
+    icon: Icons.hub_rounded,
+  ),
+  AddonPreset(
     name: 'OpenSubtitles v3',
     description: 'Subtitles in 60+ languages',
     url: 'https://opensubtitles-v3.strem.io/manifest.json',
@@ -645,6 +651,33 @@ class _AddonTileState extends State<_AddonTile> {
                                     ),
                                   ),
                                 ),
+                              if (widget.addon.manifestUrl
+                                  .toLowerCase()
+                                  .contains('debrid'))
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade900.withValues(
+                                      alpha: 0.3,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: Colors.amber.shade700,
+                                      width: 0.5,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Debrid in URL',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.amber,
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ],
@@ -959,20 +992,42 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
     }
   }
 
+  Future<void> _disconnect() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _saving = true);
+    try {
+      await ref.read(debridSettingsProvider.notifier).clear();
+      if (!mounted) return;
+      setState(() {
+        _provider = DebridProvider.none;
+        _keyController.clear();
+      });
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Debrid disabled and removed')),
+      );
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text('Error: $error')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _saving = true);
     try {
+      if (_provider == DebridProvider.none) {
+        await _disconnect();
+        return;
+      }
       final username = await ref
           .read(debridSettingsProvider.notifier)
           .save(_provider, _keyController.text);
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            _provider == DebridProvider.none
-                ? 'Debrid disabled'
-                : 'Connected to ${_provider.label}'
-                      '${username == null ? '' : ' as $username'}',
+            'Connected to ${_provider.label}'
+            '${username == null ? '' : ' as $username'}',
           ),
         ),
       );
@@ -988,6 +1043,15 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
     final config = ref.watch(debridSettingsProvider);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+
+    ref.listen<DebridConfig>(debridSettingsProvider, (prev, next) {
+      if (!next.isLoading && mounted) {
+        setState(() {
+          _provider = next.provider;
+          _keyController.text = next.apiKey;
+        });
+      }
+    });
 
     // Seed the fields once the stored config has loaded.
     if (!_initialised && !config.isLoading) {
@@ -1034,7 +1098,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<DebridProvider>(
-              initialValue: _provider,
+              value: _provider,
               decoration: const InputDecoration(
                 labelText: 'Provider',
                 border: OutlineInputBorder(),
@@ -1047,8 +1111,18 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
                     child: Text(provider.label),
                   ),
               ],
-              onChanged: (value) =>
-                  setState(() => _provider = value ?? DebridProvider.none),
+              onChanged: (value) {
+                final newProvider = value ?? DebridProvider.none;
+                setState(() {
+                  _provider = newProvider;
+                  if (newProvider == DebridProvider.none) {
+                    _keyController.clear();
+                  }
+                });
+                if (newProvider == DebridProvider.none && config.isConfigured) {
+                  unawaited(_disconnect());
+                }
+              },
             ),
             if (_provider != DebridProvider.none) ...[
               const SizedBox(height: 12),
@@ -1101,58 +1175,9 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
             const SizedBox(height: 14),
             Row(
               children: [
-                DpadFocusable(
-                  onSelect: _saving ? null : () => unawaited(_save()),
-                  child: const SizedBox.shrink(),
-                  builder: (context, focusState, _) {
-                    final isFocused = showFocusIndicator(
-                      context,
-                      focusState.focused,
-                    );
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isFocused ? Colors.white : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : () => unawaited(_save()),
-                        icon: _saving
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.link_rounded),
-                        label: Text(
-                          _provider == DebridProvider.none
-                              ? 'Disable'
-                              : 'Connect',
-                        ),
-                      ),
-                    );
-                  },
-                ),
                 if (config.isConfigured) ...[
-                  const SizedBox(width: 10),
                   DpadFocusable(
-                    onSelect: _saving
-                        ? null
-                        : () async {
-                            await ref
-                                .read(debridSettingsProvider.notifier)
-                                .clear();
-                            if (!context.mounted) return;
-                            setState(() {
-                              _provider = DebridProvider.none;
-                              _keyController.clear();
-                            });
-                          },
+                    onSelect: _saving ? null : () => unawaited(_disconnect()),
                     child: const SizedBox.shrink(),
                     builder: (context, focusState, _) {
                       final isFocused = showFocusIndicator(
@@ -1164,33 +1189,69 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: isFocused
-                                ? Colors.white
-                                : Colors.transparent,
+                            color: isFocused ? Colors.white : Colors.transparent,
                             width: 2,
                           ),
                         ),
-                        child: TextButton.icon(
-                          onPressed: _saving
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.red.shade700,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _saving ? null : () => unawaited(_disconnect()),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.link_off_rounded),
+                          label: const Text('Disable & Disconnect Debrid'),
+                        ),
+                      );
+                    },
+                  ),
+                ] else ...[
+                  DpadFocusable(
+                    onSelect: (_saving ||
+                            _provider == DebridProvider.none ||
+                            _keyController.text.trim().isEmpty)
+                        ? null
+                        : () => unawaited(_save()),
+                    child: const SizedBox.shrink(),
+                    builder: (context, focusState, _) {
+                      final isFocused = showFocusIndicator(
+                        context,
+                        focusState.focused,
+                      );
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isFocused ? Colors.white : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: FilledButton.icon(
+                          onPressed: (_saving ||
+                                  _provider == DebridProvider.none ||
+                                  _keyController.text.trim().isEmpty)
                               ? null
-                              : () async {
-                                  await ref
-                                      .read(debridSettingsProvider.notifier)
-                                      .clear();
-                                  if (!context.mounted) return;
-                                  setState(() {
-                                    _provider = DebridProvider.none;
-                                    _keyController.clear();
-                                  });
-                                },
-                          icon: const Icon(
-                            Icons.link_off_rounded,
-                            color: Colors.redAccent,
-                          ),
-                          label: const Text(
-                            'Disconnect',
-                            style: TextStyle(color: Colors.redAccent),
-                          ),
+                              : () => unawaited(_save()),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.link_rounded),
+                          label: const Text('Connect'),
                         ),
                       );
                     },
