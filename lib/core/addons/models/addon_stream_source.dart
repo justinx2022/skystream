@@ -502,12 +502,23 @@ class AddonStreamSource {
   /// When Debrid is OFF: Uses Swarm Velocity Scoring to pick streams that will
   /// PLAY SMOOTHLY, not just highest resolution. Penalizes 4K Remuxes (>12GB)
   /// that need 75+ Mbps sustained from random peers.
+  /// **HLS/Direct HTTP gets massive priority; Torrents are last resort.**
   int computeScore({bool hasActiveDebrid = false}) {
     var value = 0;
     if (isCachedDebrid) {
       value += hasActiveDebrid ? 70 : -100;
     }
-    if (isDirect) value += 45;
+    
+    // --- SOURCE TYPE PRIORITY (when no debrid) ---
+    if (!hasActiveDebrid) {
+      if (isDirect) {
+        value += 500;        // HLS/HTTP direct = TOP PRIORITY
+      } else if (isTorrent) {
+        value -= 300;        // Torrents = LAST RESORT
+      }
+    }
+    
+    if (isDirect) value += 45; // Keep existing small bonus too
 
     final bytes = sizeBytes;
     final seeds = seeders;

@@ -101,14 +101,14 @@ bool isTorrentSource(StreamResult stream) =>
     (stream.url.startsWith('/') && stream.source.contains('Torrent'));
 
 /// RACE multiple sources in parallel - return first playable URL
-/// Implements "Happy Eyeballs" for BitTorrent: fire top 3, take first working
+/// **Priority: Direct HTTP/HLS first (instant), Torrents last resort (slow ramp)**
 /// Losers self-cleanup via per-candidate hooks to avoid timing races
 Future<String?> playableUrlForRace({
   required ProviderReader read,
   required List<StreamResult> streams,
 }) async {
   final torrentStreams = streams.where(isTorrentSource).take(3).toList();
-  final directStreams = streams.where((s) => !isTorrentSource(s)).toList();
+  final directStreams = streams.where((s) => !isTorrentSource(s)).take(5).toList(); // Try 5 direct
 
   if (torrentStreams.isEmpty && directStreams.isEmpty) return null;
 
@@ -116,39 +116,12 @@ Future<String?> playableUrlForRace({
   String? winnerUrl;
   String? winnerHash;
 
-  // Race torrent candidates with self-cleanup hooks
-  for (final stream in torrentStreams) {
-    unawaited(() async {
-      try {
-        final url = await read(torrentServiceProvider)
-            .getStreamUrl(stream.url)
-            .timeout(const Duration(seconds: 10), onTimeout: () => null);
-        
-        if (url == null || url.startsWith('magnet:') || completer.isCompleted) {
-          // We lost or timed out - clean ourselves up
-          if (url != null && !url.startsWith('magnet:')) {
-            final hash = _extractHashFromStreamUrl(url);
-            if (hash != null) {
-              await read(torrentServiceProvider).removeTorrent(hash, drop: true);
-            }
-          }
-          return;
-        }
-        
-        // We won!
-        winnerUrl = url;
-        winnerHash = _extractHashFromStreamUrl(url);
-        completer.complete(url);
-      } catch (_) {}
-    }());
-  }
-
-  // Race direct streams (no cleanup needed)
-  for (final stream in directStreams.take(3)) {
+  // PHASE 1: Race DIRECT streams first (HLS, HTTP, DASH) - 5s timeout
+  for (final stream in directStreams) {
     unawaited(() async {
       try {
         final url = await _quickHeadCheck(stream.url)
-            .timeout(const Duration(seconds: 3), onTimeout: () => null);
+            .timeout(const Duration(seconds: 5), onTimeout: () => null);
         if (url != null && !completer.isCompleted) {
           winnerUrl = url;
           completer.complete(url);
@@ -157,10 +130,46 @@ Future<String?> playableUrlForRace({
     }());
   }
 
+  // Wait for direct phase to complete or timeout quickly
   try {
-    return await completer.future.timeout(const Duration(seconds: 12));
+    return await completer.future.timeout(const Duration(seconds: 6));
   } on TimeoutException {
-    return winnerUrl;
+    // PHASE 2: Direct failed/timed out -> race torrents as fallback
+    if (torrentStreams.isEmpty) return winnerUrl; // No torrents to try
+    
+    // Reset for torrent phase
+    final torrentCompleter = Completer<String?>();
+    String? torrentWinnerUrl;
+    
+    for (final stream in torrentStreams) {
+      unawaited(() async {
+        try {
+          final url = await read(torrentServiceProvider)
+              .getStreamUrl(stream.url)
+              .timeout(const Duration(seconds: 8), onTimeout: () => null);
+          
+          if (url == null || url.startsWith('magnet:') || torrentCompleter.isCompleted) {
+            if (url != null && !url.startsWith('magnet:')) {
+              final hash = _extractHashFromStreamUrl(url);
+              if (hash != null) {
+                await read(torrentServiceProvider).removeTorrent(hash, drop: true);
+              }
+            }
+            return;
+          }
+          
+          torrentWinnerUrl = url;
+          winnerHash = _extractHashFromStreamUrl(url);
+          torrentCompleter.complete(url);
+        } catch (_) {}
+      }());
+    }
+    
+    try {
+      return await torrentCompleter.future.timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      return torrentWinnerUrl ?? winnerUrl; // Fallback to any direct winner
+    }
   }
 }
 
