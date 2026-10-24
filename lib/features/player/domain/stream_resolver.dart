@@ -9,7 +9,7 @@
 /// knows which engine opens it, so both players share this.
 library;
 
-import 'dart:async';
+import 'dart:async' show Completer, TimeoutException, unawaited;
 
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
