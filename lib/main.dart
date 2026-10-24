@@ -28,6 +28,7 @@ import 'core/addons/data/addon_repository.dart';
 import 'core/models/extension_update_report.dart';
 import 'core/nuvio/data/nuvio_repository.dart';
 import 'features/extensions/widgets/extensions_sync_bridge.dart';
+import 'core/services/torrent_service.dart';
 import 'core/providers/update_provider.dart';
 import 'core/widgets/update_dialog.dart';
 import 'core/widgets/app_error_boundary.dart';
@@ -244,7 +245,20 @@ class _MyAppState extends ConsumerState<MyApp> {
       unawaited(_loadInstalledExtensions());
       _checkAppUpdates();
       unawaited(_checkExtensionsUpdates());
+      // Pre-warm TorrServer in background for instant P2P playback (no debrid needed)
+      unawaited(_prewarmTorrentServer());
     });
+  }
+
+  /// Pre-warm TorrServer so first torrent play is instant (~3s vs ~15s cold)
+  Future<void> _prewarmTorrentServer() async {
+    await Future.delayed(const Duration(seconds: 2)); // Don't block launch
+    try {
+      await ref.read(torrentServiceProvider).start();
+      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warmed for instant P2P');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warm failed: $e');
+    }
   }
 
   @override

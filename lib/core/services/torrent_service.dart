@@ -20,12 +20,12 @@ class TorrentService {
   /// The cache the server is configured with, in megabytes, and how much of it
   /// is held ahead of the read point.
   ///
-  /// Seeded with what the standard device tier would choose, because the
-  /// server can be started by a source resolver long before anything with
-  /// access to the viewer's settings runs. [applyBufferSettings] corrects it
-  /// the moment the player knows better.
-  int _cacheMb = 512;
-  int _readAheadPercent = 85;
+  /// Seeded with aggressive defaults for instant start without debrid:
+  /// - 128 MB cache (was 512) = faster allocation, less RAM
+  /// - 60% read-ahead (was 85%) = serves first byte immediately
+  /// [applyBufferSettings] overrides with user preferences when player starts.
+  int _cacheMb = 128;
+  int _readAheadPercent = 95; // Now matches TorrServer config (95% ahead)
 
   /// Points the server's cache at the size the viewer chose for the player.
   ///
@@ -91,11 +91,15 @@ class TorrentService {
         "action": "set",
         "sets": {
           "CacheSize": _cacheMb * 1024 * 1024,
-          "ReaderReadAHead": _readAheadPercent,
-          "PreloadCache": 0, // 0% preload cache ensures instant start without blocking on buffer
-          "ConnectionsLimit": 100, // 100 connections for rapid peer/swarm discovery
-          "TorrentDisconnectTimeout": 30,
+          "ReaderReadAHead": 95,              // 95% ahead = max forward buffer
+          "PreloadCache": 2,                  // 2% = ~2.5MB forces head+tail fetch
+          "ConnectionsLimit": 60,             // Sweet spot for consumer routers
+          "TorrentDisconnectTimeout": 15,
           "RetrackersMode": 1,
+          "PieceTimeout": 5,
+          "PieceSize": 262144,
+          "UseDisk": false,                   // RAM-only = faster, no disk I/O
+          "EnableIPv6": true,
         }
       };
 
@@ -107,7 +111,7 @@ class TorrentService {
 
       if (response.statusCode == 200) {
         if (kDebugMode) {
-          debugPrint("TorrServer settings configured for instant streaming.");
+          debugPrint("TorrServer: 95% read-ahead, 2% preload, 60 peers, RAM-only");
         }
       } else {
         if (kDebugMode) {
@@ -191,9 +195,9 @@ class TorrentService {
 
   Future<Map<String, dynamic>?> _pollForMetadata(String hash) async {
     int attempts = 0;
-    // Check every 350ms up to 28 attempts (~10 seconds max) so dead torrents fail over fast
-    while (attempts < 28) {
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+    // Check every 200ms up to 15 attempts (~3 seconds max) - was 28×350ms=9.8s
+    while (attempts < 15) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       try {
         final status = await _server.getTorrentStatus(hash);
         if (status != null && status['file_stats'] is List) {
@@ -325,5 +329,57 @@ class TorrentService {
       debugPrint("Generated Stream URL for Index $index: $streamUrl");
     }
     return streamUrl;
+  }
+
+  /// Remove a torrent from TorrServer
+  /// Uses correct "drop" property (not "dropData")
+  Future<void> removeTorrent(String hash, {bool drop = true}) async {
+    if (!_isStarted || _serverUrl == null) return;
+    try {
+      final token = _server.authToken;
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+      };
+      await http.post(
+        Uri.parse("$_serverUrl/torrents"),
+        headers: headers,
+        body: jsonEncode({
+          'action': 'rem',
+          'hash': hash,
+          'drop': drop,  // FIXED: "drop" not "dropData"
+        }),
+      ).timeout(const Duration(seconds: 5));
+      if (kDebugMode) debugPrint('Removed torrent: $hash (drop: $drop)');
+    } catch (e) {
+      if (kDebugMode) debugPrint('removeTorrent error: $e');
+    }
+  }
+
+  /// Get status of all active torrents for cleanup
+  Future<List<Map<String, dynamic>>> getAllTorrentsStatus() async {
+    if (!_isStarted || _serverUrl == null) return [];
+    try {
+      final token = _server.authToken;
+      final headers = {
+        'Content-Type': 'application/json',
+        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+      };
+      final response = await http.post(
+        Uri.parse("$_serverUrl/torrents"),
+        headers: headers,
+        body: jsonEncode({'action': 'get'}),
+      );
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is List) return decoded.cast<Map<String, dynamic>>();
+        if (decoded is Map && decoded['torrents'] is List) {
+          return (decoded['torrents'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('getAllTorrentsStatus error: $e');
+    }
+    return [];
   }
 }

@@ -100,6 +100,92 @@ bool isTorrentSource(StreamResult stream) =>
     stream.url.endsWith('.torrent') ||
     (stream.url.startsWith('/') && stream.source.contains('Torrent'));
 
+/// RACE multiple sources in parallel - return first playable URL
+/// Implements "Happy Eyeballs" for BitTorrent: fire top 3, take first working
+/// Losers self-cleanup via per-candidate hooks to avoid timing races
+Future<String?> playableUrlForRace({
+  required ProviderReader read,
+  required List<StreamResult> streams,
+}) async {
+  final torrentStreams = streams.where(isTorrentSource).take(3).toList();
+  final directStreams = streams.where((s) => !isTorrentSource(s)).toList();
+
+  if (torrentStreams.isEmpty && directStreams.isEmpty) return null;
+
+  final completer = Completer<String?>();
+  String? winnerUrl;
+  String? winnerHash;
+
+  // Race torrent candidates with self-cleanup hooks
+  for (final stream in torrentStreams) {
+    unawaited(() async {
+      try {
+        final url = await read(torrentServiceProvider)
+            .getStreamUrl(stream.url)
+            .timeout(const Duration(seconds: 10), onTimeout: () => null);
+        
+        if (url == null || url.startsWith('magnet:') || completer.isCompleted) {
+          // We lost or timed out - clean ourselves up
+          if (url != null && !url.startsWith('magnet:')) {
+            final hash = _extractHashFromStreamUrl(url);
+            if (hash != null) {
+              await read(torrentServiceProvider).removeTorrent(hash, drop: true);
+            }
+          }
+          return;
+        }
+        
+        // We won!
+        winnerUrl = url;
+        winnerHash = _extractHashFromStreamUrl(url);
+        completer.complete(url);
+      } catch (_) {}
+    }());
+  }
+
+  // Race direct streams (no cleanup needed)
+  for (final stream in directStreams.take(3)) {
+    unawaited(() async {
+      try {
+        final url = await _quickHeadCheck(stream.url)
+            .timeout(const Duration(seconds: 3), onTimeout: () => null);
+        if (url != null && !completer.isCompleted) {
+          winnerUrl = url;
+          completer.complete(url);
+        }
+      } catch (_) {}
+    }());
+  }
+
+  try {
+    return await completer.future.timeout(const Duration(seconds: 12));
+  } on TimeoutException {
+    return winnerUrl;
+  }
+}
+
+/// Extract torrent hash from stream URL like http://127.0.0.1:8090/stream/file.mkv?link=HASH&index=0&play
+String? _extractHashFromStreamUrl(String url) {
+  try {
+    final uri = Uri.parse(url);
+    return uri.queryParameters['link'];
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Quick HEAD check for direct streams
+Future<String?> _quickHeadCheck(String url) async {
+  try {
+    final resp = await http.head(
+      Uri.parse(url),
+      headers: {'User-Agent': kDefaultBrowserUserAgent},
+    ).timeout(const Duration(seconds: 2));
+    if (resp.statusCode < 400) return url;
+  } catch (_) {}
+  return null;
+}
+
 /// A URL that names itself as on-demand. Vetoes [_liveUrlShapes], because those
 /// are guesses and this is the source saying what it is: Xtream Codes serves
 /// VOD from `/movie/` and `/series/`, and Wowza's on-demand HLS lives under
@@ -667,7 +753,7 @@ Future<ProbeOutcome> _probe(StreamResult stream) async {
       'Range',
       () => 'bytes=0-${kProbeSniffBytes - 1}',
     );
-    final resp = await client.send(request).timeout(const Duration(seconds: 3));
+    final resp = await client.send(request).timeout(const Duration(seconds: 2));
     // Nothing to range over: an empty file, which the old one-byte check
     // passed too.
     if (resp.statusCode == 416) return ProbeOutcome.healthy;
@@ -693,7 +779,7 @@ Future<ProbeOutcome> _probe(StreamResult stream) async {
   try {
     final resp = await http
         .head(uri, headers: headers)
-        .timeout(const Duration(seconds: 3));
+        .timeout(const Duration(seconds: 2));
     if (resp.statusCode < 400) return ProbeOutcome.healthy;
   } catch (_) {
     // No answer to either.

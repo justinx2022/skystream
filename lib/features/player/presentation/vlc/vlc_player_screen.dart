@@ -43,7 +43,8 @@ import '../../domain/side_car_subtitles.dart';
 import '../../domain/skip_segments.dart';
 import '../../domain/source_row_status.dart';
 import '../../domain/playback_tracker.dart';
-import '../../domain/stream_resolver.dart';
+import '../../domain/stream_resolver.dart'
+    show playableUrlFor, playableUrlForRace, isTorrentSource;
 import '../../domain/subtitle_search_target.dart';
 import '../../domain/subtitle_style.dart';
 import '../../domain/track_language.dart';
@@ -1251,7 +1252,89 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       _startedTorrent = true;
       _startTorrentPolling();
     }
-    final playable = await playableUrlFor(read: _read, stream: stream);
+
+    // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via LocalProxy
+    // (bypasses all torrent logic, starts in <800ms)
+    String? playable;
+    if (_attemptIndex == 0 && _resolved != null && _resolved!.streams.length > 1 &&
+        (stream.url.contains('.m3u8') || 
+         stream.url.contains('/hls/') || 
+         stream.url.contains('/stream/') ||
+         stream.url.contains('.m3u'))) {
+      try {
+        await LocalProxyService.instance.startServer();
+        final proxyUrl = LocalProxyService.instance.getProxyUrl(
+          stream.url,
+          headers: playbackHeaders(stream),
+        );
+        final mediaUri = _playableUri(proxyUrl);
+        if (mediaUri != null) {
+          final headers = playbackHeaders(stream);
+          final deliverableUri = clearKey != null
+              ? await _decryptingUri(mediaUri, headers, clearKey)
+              : await _deliverableUri(mediaUri, headers);
+          if (!_disposed && generation == _generation) {
+            _lastStreamUrl = stream.url;
+            _isLive = isLiveSource(widget.item, stream.url);
+            await _controller.setMedia(
+              VlcMediaSource(
+                uri: deliverableUri,
+                httpHeaders: headers,
+                startPosition: startAt,
+                mediaOptions: <String>[
+                  if (_isLive) ...[
+                    ':live-caching=$kNetworkCachingMs',
+                    ':network-caching=$kNetworkCachingMs',
+                  ] else ...[
+                    ':network-caching=${Platform.isWindows ? 800 : 1500}',
+                    ':http-caching=${Platform.isWindows ? 800 : 1500}',
+                  ],
+                  if (Platform.isWindows) ...[
+                    ':avcodec-hw=any',
+                    ':directx-hw-yuv=1',
+                  ],
+                  if (_adaptiveMaxHeight != _deviceAdaptiveMaxHeight)
+                    ':adaptive-maxheight=$_adaptiveMaxHeight',
+                ],
+              ),
+              autoPlay: true,
+            );
+            if (!_disposed && generation == _generation) {
+              _handedToEngine = true;
+              _startAttemptClock();
+              if (!_isLive && looksLikeHls(deliverableUri)) {
+                _hlsMedia = (uri: deliverableUri, headers: headers);
+              }
+              return; // SUCCESS - HLS playing instantly
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[VLC] HLS direct play failed, falling back: $e');
+        // Fall through to normal logic
+      }
+    }
+
+    // PRIORITY 2: Race torrents + other sources (only on first attempt)
+    if (_attemptIndex == 0 && _resolved != null && _resolved!.streams.length > 1) {
+      playable = await playableUrlForRace(read: _read, streams: _resolved!.streams)
+          .timeout(const Duration(seconds: 12), onTimeout: () => null);
+      if (playable != null) {
+        // Find which stream won the race
+        final winnerIndex = _resolved!.streams.indexWhere((s) => 
+          isTorrentSource(s) ? s.url == playable : s.url == playable);
+        if (winnerIndex != -1) {
+          _attemptIndex = winnerIndex;
+          // Recurse with winning stream
+          return _openAttempt(winnerIndex, startAt: startAt, retries: retries);
+        }
+      }
+    }
+    
+    // PRIORITY 3: Single source fallback
+    if (playable == null) {
+      playable = await playableUrlFor(read: _read, stream: stream);
+    }
     if (_disposed || generation != _generation) return;
     if (playable == null) {
       return _failAttempt(

@@ -13,12 +13,15 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../../core/services/local_proxy_service.dart';
+import '../../../../core/services/torrent_service.dart';
+import '../../../../features/player/domain/network_buffer.dart';
+import '../../../../features/player/domain/stream_resolver.dart'
+    show playableUrlFor, playableUrlForRace, isTorrentSource;
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../../details/presentation/details_controller.dart';
 import '../../domain/hls_video_length.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
-import '../../domain/stream_resolver.dart';
 import '../../domain/episode_navigator.dart';
 import '../vlc/next_episode_countdown.dart';
 import '../vlc/player_startup_view.dart';
@@ -79,6 +82,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   bool _isFullscreen = false;
   BoxFit _fit = BoxFit.contain;
 
+  bool _nextEpisodePreSeeded = false; // Track if next episode pre-seeding started
+
   PlaybackProgressRecorder? _recorder;
   PlaybackTracker? _tracker;
   int _token = 0;
@@ -135,6 +140,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
 
     _applyMpvOptimizations();
+    _applyTorrentBuffer(); // Apply user buffer settings to TorrServer
     _listenPlayerStreams();
     _startPlayback();
     _startControlsTimer();
@@ -157,10 +163,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
           // Mobile cache tuning (smooth, zero memory/bus saturation)
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '30');
-          await native.setProperty('demuxer-max-bytes', '33554432'); // 32 MiB
-          await native.setProperty('demuxer-max-back-bytes', '8388608'); // 8 MiB
+          await native.setProperty('cache-secs', '20');
+          await native.setProperty('demuxer-max-bytes', '67108864');  // 64 MiB
+          await native.setProperty('demuxer-max-back-bytes', '4194304'); // 4 MiB
           await native.setProperty('demuxer-readahead-secs', '15');
+          // CRITICAL: Stop libmpv from deep probing on local loopback
+          await native.setProperty('demuxer-lavf-probesize', '500000');
+          await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
+          await native.setProperty('network-timeout', '10');
+          await native.setProperty('stream-lavf-o', 'timeout=10000000');
+          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
         } else if (!kIsWeb && Platform.isWindows) {
           await native.setProperty('hwdec', 'auto-safe');
 
@@ -181,12 +193,21 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           await native.setProperty('framedrop', 'vo');
           await native.setProperty('video-sync', 'audio');
 
-          // Desktop aggressive caching
+          // Low-latency caching for instant start + local loopback optimization
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '120');
-          await native.setProperty('demuxer-max-bytes', '157286400'); // 150 MiB
-          await native.setProperty('demuxer-max-back-bytes', '52428800'); // 50 MiB
-          await native.setProperty('demuxer-readahead-secs', '60');
+          await native.setProperty('cache-secs', '20');              // 20s ring buffer
+          await native.setProperty('demuxer-max-bytes', '67108864');  // 64 MiB
+          await native.setProperty('demuxer-max-back-bytes', '4194304'); // 4 MiB
+          await native.setProperty('demuxer-readahead-secs', '15');   // 15s ahead
+
+          // CRITICAL: Stop libmpv from deep probing on local loopback
+          await native.setProperty('demuxer-lavf-probesize', '500000');    // 500KB max probe
+          await native.setProperty('demuxer-lavf-analyzeduration', '1000000'); // 1ms max analyze
+          await native.setProperty('network-timeout', '10');                // 10s connect timeout
+
+          // Treat localhost as local (disable network buffering logic)
+          await native.setProperty('stream-lavf-o', 'timeout=10000000');
+          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
         }
 
         await native.setProperty('audio-pitch-correction', 'yes');
@@ -194,6 +215,63 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       } catch (e) {
         if (kDebugMode) debugPrint('[MediaKit] Error configuring mpv properties: $e');
       }
+    }
+  }
+
+  /// Apply user-configured buffer settings to TorrServer (matches VLC behavior)
+  Future<void> _applyTorrentBuffer() async {
+    final mb = resolveNetworkBufferMb(
+      ref.read(playerSettingsProvider).asData?.value.networkBufferMb,
+      ref.read(deviceProfileProvider).asData?.value.tier ?? DeviceTier.standard,
+      chosenDurationMinutes: ref.read(playerSettingsProvider).asData?.value.bufferDurationMinutes,
+    );
+    unawaited(
+      ref.read(torrentServiceProvider).applyBufferSettings(
+        cacheMb: mb,
+        readAheadPercent: torrentReadAheadPercent(mb),
+      ),
+    );
+  }
+
+  /// Pre-seed next episode torrent in background for instant "Next Episode"
+  /// Waits until current episode's buffer covers the end to avoid RAM contention
+  Future<void> _preSeedNextEpisode() async {
+    final nextEp = _nextEpisode;
+    if (nextEp == null) return;
+
+    // Wait until current episode is in final 45s AND buffer covers remainder
+    // This ensures libmpv has cached all of Episode 1 before we touch TorrServer
+    while (!_disposed && mounted) {
+      final remaining = _duration - _position;
+      final bufferedEnd = _buffer > _position ? _buffer : _position + _buffer;
+      final bufferCoversEnd = bufferedEnd >= _duration - const Duration(seconds: 5);
+      
+      if (remaining <= const Duration(seconds: 45) && bufferCoversEnd) break;
+      await Future.delayed(const Duration(seconds: 5));
+      if (_disposed || !mounted) return;
+    }
+    
+    if (_disposed || !mounted) return;
+
+    try {
+      final resolved = await resolvePlayback(
+        read: ref.read,
+        item: _item,
+        videoUrl: nextEp.url,
+        probeCandidates: 0,
+        isCancelled: () => _disposed,
+      );
+
+      for (final stream in resolved.streams) {
+        if (isTorrentSource(stream)) {
+          // Pre-seed WITHOUT changing global settings - just join swarm
+          await ref.read(torrentServiceProvider).getStreamUrl(stream.url);
+          if (kDebugMode) debugPrint('[SkyStream] Pre-seeded next episode (buffer-safe): ${nextEp.name}');
+          break;
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[SkyStream] Pre-seed failed: $e');
     }
   }
 
@@ -281,6 +359,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _attemptIndex = 0;
       _nextEpisodeOffer = null;
       _nextEpisodeDeclined = false;
+      _nextEpisodePreSeeded = false; // Reset for new episode
     });
 
     await _startPlayback();
@@ -301,6 +380,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
               setState(() => _nextEpisodeOffer = _nextEpisode);
             }
           }
+        }
+
+        // PRE-SEED NEXT EPISODE: Start torrent in background when 5 min remaining
+        if (_hasNextEpisode && !_nextEpisodePreSeeded && remaining > Duration.zero && remaining <= const Duration(minutes: 5)) {
+          _nextEpisodePreSeeded = true;
+          unawaited(_preSeedNextEpisode());
         }
       }),
     );
@@ -474,8 +559,53 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
 
     try {
-      final playable = await playableUrlFor(read: ref.read, stream: stream)
-          .timeout(const Duration(seconds: 14), onTimeout: () => null);
+      // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via LocalProxy
+      // (bypasses all torrent logic, starts in <800ms)
+      if (index == 0 && (stream.url.contains('.m3u8') || 
+          stream.url.contains('/hls/') || 
+          stream.url.contains('/stream/') ||
+          stream.url.contains('.m3u'))) {
+        try {
+          await LocalProxyService.instance.startServer();
+          final proxyUrl = LocalProxyService.instance.getProxyUrl(
+            stream.url,
+            headers: playbackHeaders(stream),
+          );
+
+          final media = Media(
+            proxyUrl,
+            httpHeaders: playbackHeaders(stream),
+            start: startAt > Duration.zero ? startAt : null,
+          );
+          await _player.open(media, play: true);
+          await _player.play();
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          return; // SUCCESS - HLS playing instantly
+        } catch (e) {
+          if (kDebugMode) debugPrint('[MediaKit] HLS direct play failed, falling back: $e');
+          // Fall through to normal logic
+        }
+      }
+
+      // PRIORITY 2: Race torrents + other sources
+      String? playable;
+      if (index == 0 && streams.length > 1) {
+        playable = await playableUrlForRace(read: ref.read, streams: streams)
+            .timeout(const Duration(seconds: 12), onTimeout: () => null);
+        if (playable != null) {
+          // Find which stream won the race
+          final winnerIndex = streams.indexWhere((s) => 
+            isTorrentSource(s) ? s.url == playable : s.url == playable);
+          if (winnerIndex != -1) _attemptIndex = winnerIndex;
+        }
+      }
+      
+      // Fallback to single source if race failed or not applicable
+      if (playable == null) {
+        playable = await playableUrlFor(read: ref.read, stream: stream)
+            .timeout(const Duration(seconds: 14), onTimeout: () => null);
+      }
 
       if (_disposed || !mounted) return;
 
@@ -507,7 +637,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
         if (referer != null && referer.isNotEmpty) {
-          await native.setProperty('referrer', referer);
+          await native.setProperty('referer', referer);
         }
       }
 
@@ -651,8 +781,25 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     });
   }
 
-  void _showAudioTrackDialog() {
+  Future<void> _rescanTracks() async {
+    if (_player.platform is NativePlayer) {
+      final native = _player.platform as NativePlayer;
+      // Temporarily increase probesize for deep scan
+      await native.setProperty('demuxer-lavf-probesize', '5000000'); // 5MB
+      await native.setProperty('demuxer-lavf-analyzeduration', '5000000'); // 5s
+      // Force track refresh
+      await native.setProperty('track-auto-selection', 'yes');
+      // Restore low-latency settings
+      await Future.delayed(const Duration(seconds: 2));
+      await native.setProperty('demuxer-lavf-probesize', '500000');
+      await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
+    }
+  }
+
+  Future<void> _showAudioTrackDialog() async {
     _onUserActivity();
+    await _rescanTracks();  // FIXED: await before showing dialog
+    if (!mounted) return;
     final audioTracks = _player.state.tracks.audio;
     final current = _player.state.track.audio;
     showModalBottomSheet<void>(
@@ -713,8 +860,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
   }
 
-  void _showSubtitleTrackDialog() {
+  Future<void> _showSubtitleTrackDialog() async {
     _onUserActivity();
+    await _rescanTracks();  // FIXED: await before showing dialog
+    if (!mounted) return;
     final subTracks = _player.state.tracks.subtitle;
     final current = _player.state.track.subtitle;
     showModalBottomSheet<void>(

@@ -498,6 +498,10 @@ class AddonStreamSource {
   /// bundled torrent server — unlike a browser client, a 4K torrent is not
   /// second-class here. Direct links still get a head start for instant
   /// playback, cached debrid links more so when debrid is configured, and CAM rips are buried.
+  ///
+  /// When Debrid is OFF: Uses Swarm Velocity Scoring to pick streams that will
+  /// PLAY SMOOTHLY, not just highest resolution. Penalizes 4K Remuxes (>12GB)
+  /// that need 75+ Mbps sustained from random peers.
   int computeScore({bool hasActiveDebrid = false}) {
     var value = 0;
     if (isCachedDebrid) {
@@ -505,24 +509,63 @@ class AddonStreamSource {
     }
     if (isDirect) value += 45;
 
-    final quality = qualityScore;
-    if (quality >= 2160) {
-      value += 140;
-    } else if (quality >= 1440) {
-      value += 110;
-    } else if (quality >= 1080) {
-      value += 85;
-    } else if (quality >= 720) {
-      value += 45;
+    // --- Swarm Velocity Scoring (when no debrid) ---
+    if (!hasActiveDebrid) {
+      final bytes = sizeBytes;
+      final seeds = seeders;
+      final quality = qualityScore;
+
+      // Calculate sustained bandwidth needed (Mbps)
+      double requiredMbps = 0;
+      if (bytes != null && bytes > 0) {
+        // Rough estimate: file size (GB) * 8 / duration (hours) * 1.5 overhead
+        // For unknown duration, assume 2h movie / 45m episode based on quality
+        final gb = bytes / (1024 * 1024 * 1024);
+        final hours = quality >= 2160 ? 2.5 : (quality >= 1080 ? 2.0 : 1.0);
+        requiredMbps = (gb * 8 / hours) * 1.5; // 1.5x overhead for P2P variance
+      }
+
+      // Velocity Score = (Available Seeder BW) / (Required BW) * 100
+      // Assume avg seeder upload = 5 Mbps (conservative for residential)
+      if (seeds != null && seeds > 0 && requiredMbps > 0) {
+        final availableMbps = seeds * 5.0;
+        final velocityRatio = availableMbps / requiredMbps;
+
+        if (velocityRatio >= 3.0) value += 100;      // 3x headroom = instant
+        else if (velocityRatio >= 1.5) value += 60;  // 1.5x = smooth
+        else if (velocityRatio >= 1.0) value += 20;  // barely sustainable
+        else value -= 80;                            // will stall
+      }
+
+      // Codec efficiency bonus (HEVC/AV1 = smaller file = faster)
+      final text = _text.toLowerCase();
+      if (text.contains('hevc') || text.contains('x265') ||
+          text.contains('h265') || text.contains('av1')) {
+        value += 40; // 30-50% less bandwidth for same quality
+      }
+
+      // Hard penalty for >12GB files without debrid (4K Remux trap)
+      if (bytes != null && bytes > 12 * 1024 * 1024 * 1024) {
+        value -= 150;
+      }
+
+      // CAM/TS penalty
+      if (isCam) value -= 150;
+    } else {
+      // Original quality scoring when debrid IS active
+      final quality = qualityScore;
+      if (quality >= 2160) value += 140;
+      else if (quality >= 1440) value += 110;
+      else if (quality >= 1080) value += 85;
+      else if (quality >= 720) value += 45;
+      if (isHdr) value += 12;
+      if (isCam) value -= 150;
     }
 
-    if (isHdr) value += 12;
-    if (isCam) value -= 150;
-
-    final seeds = seeders;
+    // Seeder bonus (capped)
     if (seeds != null) value += (seeds.clamp(0, 60) / 2).round();
 
-    final bytes = sizeBytes;
+    // Size bonus (capped)
     if (bytes != null) {
       value += (bytes / (1024 * 1024 * 1024)).clamp(0, 20).round();
     }
