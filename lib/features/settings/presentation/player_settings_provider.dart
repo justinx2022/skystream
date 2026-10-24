@@ -11,6 +11,10 @@ import '../../player/data/subtitle_providers.dart';
 import '../../../core/network/dio_client_provider.dart';
 import '../../../core/services/segment_prefetch_manager.dart';
 import '../../../core/services/lan_sync_service.dart';
+import '../../../core/addons/models/addon_stream_source.dart'
+    show PreferredStreamType;
+export '../../../core/addons/models/addon_stream_source.dart'
+    show PreferredStreamType;
 
 part 'player_settings_provider.g.dart';
 
@@ -48,15 +52,7 @@ enum QualityFilterMode {
   atOrBelow, // Hide sources strictly above the preferred tier (data-saver mode)
 }
 
-/// Which type of stream to prefer when multiple sources are available.
-/// HLS/Direct = fast instant play; Torrent = P2P (slower start, more sources).
-enum PreferredStreamType {
-  /// Prefer direct HLS/HTTP streams (instant play, <1s start)
-  hlsDirect,
-
-  /// Prefer torrent/P2P streams (more sources, slower ramp)
-  torrent,
-}
+// PreferredStreamType is exported from addon_stream_source.dart
 
 /// Whether a video starts with a subtitle showing.
 ///

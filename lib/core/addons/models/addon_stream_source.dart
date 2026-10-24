@@ -115,6 +115,16 @@ class AddonSubtitleTrack {
 
 enum AddonStreamKind { direct, torrent, youtube, external, unknown }
 
+/// Which type of stream to prefer when multiple sources are available.
+/// HLS/Direct = fast instant play; Torrent = P2P (slower start, more sources).
+enum PreferredStreamType {
+  /// Prefer direct HLS/HTTP streams (instant play, <1s start)
+  hlsDirect,
+
+  /// Prefer torrent/P2P streams (more sources, slower ramp)
+  torrent,
+}
+
 /// One playable result from an add-on.
 class AddonStreamSource {
   final String addonId;
