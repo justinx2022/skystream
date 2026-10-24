@@ -93,13 +93,14 @@ class TorrentService {
           "CacheSize": _cacheMb * 1024 * 1024,
           "ReaderReadAHead": 95,              // 95% ahead = max forward buffer
           "PreloadCache": 2,                  // 2% = ~2.5MB forces head+tail fetch
-          "ConnectionsLimit": 60,             // Sweet spot for consumer routers
-          "TorrentDisconnectTimeout": 15,
+          "ConnectionsLimit": 80,             // ↑ 80 peers = more parallel pipes
+          "TorrentDisconnectTimeout": 10,     // ↓ 10s = drop slow peers faster
           "RetrackersMode": 1,
-          "PieceTimeout": 5,
+          "PieceTimeout": 3,                  // ↓ 3s = drop stuck pieces faster
           "PieceSize": 262144,
           "UseDisk": false,                   // RAM-only = faster, no disk I/O
           "EnableIPv6": true,
+          "DhtConnectionLimit": 500,          // More DHT nodes = better peer discovery
         }
       };
 
