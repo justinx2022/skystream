@@ -48,6 +48,16 @@ enum QualityFilterMode {
   atOrBelow, // Hide sources strictly above the preferred tier (data-saver mode)
 }
 
+/// Which type of stream to prefer when multiple sources are available.
+/// HLS/Direct = fast instant play; Torrent = P2P (slower start, more sources).
+enum PreferredStreamType {
+  /// Prefer direct HLS/HTTP streams (instant play, <1s start)
+  hlsDirect,
+
+  /// Prefer torrent/P2P streams (more sources, slower ramp)
+  torrent,
+}
+
 /// Whether a video starts with a subtitle showing.
 ///
 /// A default, not a lock. [off] decides only what the player does with media
@@ -97,6 +107,10 @@ class PlayerSettings {
 
   /// Quality to prefer when on mobile data. Default: 1080p.
   final QualityPreference mobileQuality;
+
+  /// Which stream type to prefer: HLS/Direct (fast) or Torrent (more sources).
+  /// Default: HLS/Direct for instant play.
+  final PreferredStreamType preferredStreamType;
 
   /// Controls whether streams below/above the quality preference are hidden.
   /// Default: [QualityFilterMode.any] (sort only, no filtering).
@@ -202,6 +216,7 @@ class PlayerSettings {
     this.preferredPlayer,
     this.wifiQuality = kDefaultWifiQuality,
     this.mobileQuality = QualityPreference.q1080,
+    this.preferredStreamType = PreferredStreamType.hlsDirect,
     this.qualityFilterMode = QualityFilterMode.any,
     this.networkBufferMb,
     this.bufferDurationMinutes,
@@ -243,6 +258,7 @@ class PlayerSettings {
     bool clearPreferredPlayer = false,
     QualityPreference? wifiQuality,
     QualityPreference? mobileQuality,
+    PreferredStreamType? preferredStreamType,
     QualityFilterMode? qualityFilterMode,
     int? networkBufferMb,
     int? bufferDurationMinutes,
@@ -286,6 +302,7 @@ class PlayerSettings {
           : (preferredPlayer ?? this.preferredPlayer),
       wifiQuality: wifiQuality ?? this.wifiQuality,
       mobileQuality: mobileQuality ?? this.mobileQuality,
+      preferredStreamType: preferredStreamType ?? this.preferredStreamType,
       qualityFilterMode: qualityFilterMode ?? this.qualityFilterMode,
       networkBufferMb: networkBufferMb ?? this.networkBufferMb,
       bufferDurationMinutes:
@@ -437,6 +454,10 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       storage.getPlayerSetting<String>('player_quality_filter_mode'),
     );
 
+    final preferredStreamType = _parsePreferredStreamType(
+      storage.getPlayerSetting<String>('player_preferred_stream_type'),
+    );
+
     final showPip =
         storage.getPlayerSetting<bool>('player_show_pip', defaultValue: true) ??
         true;
@@ -529,6 +550,7 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
       preferredPlayer: prefPlayer,
       wifiQuality: wifiQ,
       mobileQuality: mobileQ,
+      preferredStreamType: preferredStreamType,
       qualityFilterMode: filterMode,
       networkBufferMb: networkBufferMb,
       bufferDurationMinutes: bufferDurationMinutes,
@@ -677,6 +699,11 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     final clamped = percent.clamp(100, 200);
     await _repository.setPlayerSetting('player_max_volume', clamped);
     _update((PlayerSettings c) => c.copyWith(maxVolumePercent: clamped));
+  }
+
+  Future<void> setPreferredStreamType(PreferredStreamType val) async {
+    await _repository.setPlayerSetting('player_preferred_stream_type', val.name);
+    _update((PlayerSettings c) => c.copyWith(preferredStreamType: val));
   }
 
   Future<void> setShowPip(bool val) async {
@@ -932,6 +959,14 @@ class PlayerSettingsNotifier extends _$PlayerSettingsNotifier {
     return QualityFilterMode.values.firstWhere(
       (e) => e.name == s,
       orElse: () => QualityFilterMode.any,
+    );
+  }
+
+  PreferredStreamType _parsePreferredStreamType(String? s) {
+    if (s == null) return PreferredStreamType.hlsDirect;
+    return PreferredStreamType.values.firstWhere(
+      (e) => e.name == s,
+      orElse: () => PreferredStreamType.hlsDirect,
     );
   }
 }

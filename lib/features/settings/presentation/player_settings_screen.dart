@@ -404,6 +404,21 @@ class PlayerSettingsScreen extends ConsumerWidget {
                     ),
                   ),
                   SettingsTile(
+                    icon: Icons.router_rounded,
+                    title: 'Preferred Stream Type',
+                    subtitle: _preferredStreamTypeLabel(
+                      playerSettings.preferredStreamType,
+                    ),
+                    onTap: () => showPreferredStreamTypeDialog(
+                      context,
+                      ref,
+                      current: playerSettings.preferredStreamType,
+                      onChanged: ref
+                          .read(playerSettingsProvider.notifier)
+                          .setPreferredStreamType,
+                    ),
+                  ),
+                  SettingsTile(
                     icon: Icons.tune_rounded,
                     title: l10n.playerControls,
                     subtitle: l10n.playerControlsSubtitle,
@@ -479,4 +494,56 @@ String _qualityFilterModeLabel(QualityFilterMode mode) {
     case QualityFilterMode.atOrBelow:
       return 'Hide sources above preference';
   }
+}
+
+String _preferredStreamTypeLabel(PreferredStreamType type) {
+  switch (type) {
+    case PreferredStreamType.hlsDirect:
+      return 'HLS / Direct HTTP (Instant, <1s)';
+    case PreferredStreamType.torrent:
+      return 'Torrent / P2P (More sources, slower start)';
+  }
+}
+
+void showPreferredStreamTypeDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  required PreferredStreamType current,
+  required ValueChanged<PreferredStreamType> onChanged,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Preferred Stream Type'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          RadioListTile<PreferredStreamType>(
+            title: const Text('HLS / Direct HTTP (Instant, <1s)'),
+            subtitle: const Text('Fast start, plays immediately. Best for most content.'),
+            value: PreferredStreamType.hlsDirect,
+            groupValue: current,
+            onChanged: (val) {
+              if (val != null) {
+                onChanged(val);
+                Navigator.pop(context);
+              }
+            },
+          ),
+          RadioListTile<PreferredStreamType>(
+            title: const Text('Torrent / P2P (More sources, slower start)'),
+            subtitle: const Text('More sources available, but slower ramp-up. Use for obscure content.'),
+            value: PreferredStreamType.torrent,
+            groupValue: current,
+            onChanged: (val) {
+              if (val != null) {
+                onChanged(val);
+                Navigator.pop(context);
+              }
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
