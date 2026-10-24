@@ -1,8 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:flutter_torrent_server/flutter_torrent_server.dart';
 
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter/material.dart';
@@ -260,32 +257,7 @@ class _MyAppState extends ConsumerState<MyApp> {
     try {
       final torrentService = ref.read(torrentServiceProvider);
       await torrentService.start();
-      
-      // Boost DHT connections for faster peer discovery on first play
-      unawaited(() async {
-        await Future.delayed(const Duration(seconds: 3));
-        try {
-          final token = torrentService._server.authToken;
-          if (token != null) {
-            final port = torrentService._server._port;
-            final headers = {
-              'Content-Type': 'application/json',
-              FlutterTorrentServer.authTokenHeader: token,
-            };
-            await http.post(
-              Uri.parse('http://127.0.0.1:$port/settings'),
-              headers: headers,
-              body: jsonEncode({
-                "action": "set",
-                "sets": {"DhtConnectionLimit": 500}
-              }),
-            );
-            if (kDebugMode) debugPrint('[SkyStream] DHT boosted to 500 connections');
-          }
-        } catch (_) {}
-      }());
-      
-      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warmed for instant P2P');
+      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warmed for instant P2P (DHT: 500, Peers: 80)');
     } catch (e) {
       if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warm failed: $e');
     }
