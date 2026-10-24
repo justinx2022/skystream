@@ -112,7 +112,7 @@ class TorrentService {
 
       if (response.statusCode == 200) {
         if (kDebugMode) {
-          debugPrint("TorrServer: 95% read-ahead, 2% preload, 60 peers, RAM-only");
+          debugPrint("TorrServer: 95% read-ahead, 2% preload, 80 peers, 3s timeout, 500 DHT, RAM-only");
         }
       } else {
         if (kDebugMode) {
