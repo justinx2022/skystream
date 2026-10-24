@@ -503,7 +503,10 @@ class AddonStreamSource {
   /// PLAY SMOOTHLY, not just highest resolution. Penalizes 4K Remuxes (>12GB)
   /// that need 75+ Mbps sustained from random peers.
   /// **HLS/Direct HTTP gets massive priority; Torrents are last resort.**
-  int computeScore({bool hasActiveDebrid = false}) {
+  int computeScore({
+    bool hasActiveDebrid = false,
+    PreferredStreamType preferredStreamType = PreferredStreamType.hlsDirect,
+  }) {
     var value = 0;
     if (isCachedDebrid) {
       value += hasActiveDebrid ? 70 : -100;
@@ -511,10 +514,18 @@ class AddonStreamSource {
     
     // --- SOURCE TYPE PRIORITY (when no debrid) ---
     if (!hasActiveDebrid) {
-      if (isDirect) {
-        value += 500;        // HLS/HTTP direct = TOP PRIORITY
-      } else if (isTorrent) {
-        value -= 300;        // Torrents = LAST RESORT
+      if (preferredStreamType == PreferredStreamType.hlsDirect) {
+        if (isDirect) {
+          value += 500;        // HLS/HTTP direct = TOP PRIORITY
+        } else if (isTorrent) {
+          value -= 300;        // Torrents = LAST RESORT
+        }
+      } else if (preferredStreamType == PreferredStreamType.torrent) {
+        if (isTorrent) {
+          value += 200;        // Torrent preferred
+        } else if (isDirect) {
+          value -= 100;        // Direct penalized
+        }
       }
     }
     
@@ -625,11 +636,15 @@ List<AddonStreamSource> rankAddonStreams(
   String? title,
   int? year,
   bool hasActiveDebrid = false,
+  PreferredStreamType preferredStreamType = PreferredStreamType.hlsDirect,
 }) {
   final ranked = streams.toList();
   final scores = Map<AddonStreamSource, int>.identity();
   for (final stream in ranked) {
-    scores[stream] = stream.computeScore(hasActiveDebrid: hasActiveDebrid);
+    scores[stream] = stream.computeScore(
+      hasActiveDebrid: hasActiveDebrid,
+      preferredStreamType: preferredStreamType,
+    );
   }
 
   final suspects = Set<AddonStreamSource>.identity();
