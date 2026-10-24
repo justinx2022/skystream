@@ -29,6 +29,7 @@ import 'core/models/extension_update_report.dart';
 import 'core/nuvio/data/nuvio_repository.dart';
 import 'features/extensions/widgets/extensions_sync_bridge.dart';
 import 'core/services/torrent_service.dart';
+import 'core/extensions/providers.dart';
 import 'core/providers/update_provider.dart';
 import 'core/widgets/update_dialog.dart';
 import 'core/widgets/app_error_boundary.dart';

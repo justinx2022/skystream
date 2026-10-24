@@ -43,8 +43,7 @@ import '../../domain/side_car_subtitles.dart';
 import '../../domain/skip_segments.dart';
 import '../../domain/source_row_status.dart';
 import '../../domain/playback_tracker.dart';
-import '../../domain/stream_resolver.dart'
-    show playableUrlFor, playableUrlForRace, isTorrentSource;
+import '../../domain/stream_resolver.dart';
 import '../../domain/subtitle_search_target.dart';
 import '../../domain/subtitle_style.dart';
 import '../../domain/track_language.dart';

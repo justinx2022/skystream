@@ -7,12 +7,13 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../models/addon_manifest.dart';
 import '../models/addon_stream_source.dart';
 import 'addon_client.dart';
+import 'debrid_service.dart';
 
 part 'addon_stream_service.g.dart';
 
 @Riverpod(keepAlive: true)
 AddonStreamService addonStreamService(Ref ref) =>
-    AddonStreamService(ref.watch(addonClientProvider));
+    AddonStreamService(ref.watch(addonClientProvider), ref: ref);
 
 /// Everything needed to ask add-ons for links to one movie/episode.
 class AddonStreamRequest {
@@ -180,15 +181,18 @@ class AddonStreamProgress {
 class AddonStreamService {
   AddonStreamService(
     this._client, {
+    Ref? ref,
     // CNCVerse live probes need ~22–27 s per /stream answer. Budget must
     // cover one successful scrape plus a short empty-id retry, without
     // letting a totally dead host hold a worker forever.
     Duration addonBudget = const Duration(seconds: 55),
     Duration requestTimeout = const Duration(seconds: 45),
-  }) : _addonBudget = addonBudget,
+  }) : _ref = ref,
+       _addonBudget = addonBudget,
        _requestTimeout = requestTimeout;
 
   final AddonClient _client;
+  final Ref? _ref;
 
   /// One request's ceiling. Matched to [AddonClient]'s stream receive
   /// timeout so Dio and the service agree; scraping bridges land in the
@@ -282,7 +286,7 @@ class AddonStreamService {
     var completed = 0;
 
     final updates = StreamController<AddonStreamProgress>();
-    final hasDebrid = _ref.read(debridSettingsProvider).isConfigured;
+    final hasDebrid = _ref?.read(debridSettingsProvider).isConfigured ?? false;
 
     // Best first, with links to some other film the add-on found last.
     List<AddonStreamSource> ranked() => rankAddonStreams(

@@ -509,10 +509,11 @@ class AddonStreamSource {
     }
     if (isDirect) value += 45;
 
+    final bytes = sizeBytes;
+    final seeds = seeders;
+
     // --- Swarm Velocity Scoring (when no debrid) ---
     if (!hasActiveDebrid) {
-      final bytes = sizeBytes;
-      final seeds = seeders;
       final quality = qualityScore;
 
       // Calculate sustained bandwidth needed (Mbps)

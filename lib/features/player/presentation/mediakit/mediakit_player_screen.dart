@@ -13,10 +13,11 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../../core/services/local_proxy_service.dart';
+import '../../../../core/providers/device_info_provider.dart';
+import '../../../../core/extensions/providers.dart';
 import '../../../../core/services/torrent_service.dart';
-import '../../../../features/player/domain/network_buffer.dart';
-import '../../../../features/player/domain/stream_resolver.dart'
-    show playableUrlFor, playableUrlForRace, isTorrentSource;
+import '../../domain/network_buffer.dart';
+import '../../domain/stream_resolver.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../../details/presentation/details_controller.dart';
 import '../../domain/hls_video_length.dart';
@@ -372,9 +373,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         setState(() => _position = pos);
         _maybeRecordProgress(pos);
 
+        final remaining = _duration - pos;
+
         // Offer Next Episode in the final 35 seconds of the episode
         if (_hasNextEpisode && !_nextEpisodeDeclined && _duration > const Duration(minutes: 5)) {
-          final remaining = _duration - pos;
           if (remaining > Duration.zero && remaining <= const Duration(seconds: 35)) {
             if (_nextEpisodeOffer == null) {
               setState(() => _nextEpisodeOffer = _nextEpisode);
