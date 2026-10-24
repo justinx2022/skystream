@@ -8,6 +8,7 @@ import '../models/addon_manifest.dart';
 import '../models/addon_stream_source.dart';
 import 'addon_client.dart';
 import 'debrid_service.dart';
+import 'direct_hls_service.dart';
 import '../../../features/settings/presentation/player_settings_provider.dart';
 
 part 'addon_stream_service.g.dart';
@@ -227,15 +228,6 @@ class AddonStreamService {
     CancelToken? cancelToken,
   }) async* {
     final providers = streamProvidersOf(addons);
-
-    if (providers.isEmpty) {
-      yield const AddonStreamProgress(
-        error:
-            'No installed add-on provides streams. Add one (for example '
-            'Torrentio) from the "My add-ons" tab.',
-      );
-      return;
-    }
 
     // Scraper-bridge titles often arrive with only a cnc: token. Resolve an
     // IMDb id from the title (Cinemeta, cached) so every stream add-on has a
@@ -481,6 +473,31 @@ class AddonStreamService {
     }
 
     unawaited(() async {
+      final hlsTask = () async {
+        if (_ref != null) {
+          try {
+            final hlsSources = await _ref.read(directHlsServiceProvider).resolveDirectStreams(
+              imdbId: effective.imdbId,
+              type: effective.type,
+              season: effective.season,
+              episode: effective.episode,
+              title: effective.title,
+              cancelToken: cancelToken,
+            );
+            if (hlsSources.isNotEmpty) {
+              for (final s in hlsSources) {
+                if (seen.add(s.dedupeKey)) {
+                  streams.add(s);
+                }
+              }
+              if (!updates.isClosed) updates.add(snapshot());
+            }
+          } catch (e) {
+            if (kDebugMode) debugPrint('[AddonStreamService] direct HLS error: $e');
+          }
+        }
+      }();
+
       // Every stream add-on runs now (up to the cap). Links surface the
       // moment each one answers — the sheet never waits on the slowest
       // host before showing the fast ones.
@@ -497,7 +514,7 @@ class AddonStreamService {
           }
         }),
       );
-      await Future.wait(workers);
+      await Future.wait([...workers, hlsTask]);
       if (!updates.isClosed) await updates.close();
     }());
 
@@ -510,7 +527,9 @@ class AddonStreamService {
       completedCount: completed,
       totalCount: providers.length,
       error: streams.isEmpty
-          ? 'No add-on returned links for ${ids.first}.'
+          ? (providers.isEmpty
+              ? 'No installed add-on provides streams. Add one (for example Torrentio) from the "My add-ons" tab.'
+              : 'No add-on returned links for ${ids.first}.')
           : null,
     );
   }

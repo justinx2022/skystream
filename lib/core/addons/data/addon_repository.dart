@@ -71,8 +71,11 @@ class AddonRepository extends _$AddonRepository {
       }
       state = AddonsState(addons: addons, isLoading: false);
 
-      // Pre-seed Torrentio for Western and Hollywood content if not present
-      if (!addons.any((a) => a.manifestUrl.contains('torrentio'))) {
+      // Pre-seed Torrentio on first run if not present
+      final hasPreseeded = prefs.getBool('has_preseeded_torrentio_v1') ?? false;
+      if (!hasPreseeded) {
+        await prefs.setBool('has_preseeded_torrentio_v1', true);
+        if (!addons.any((a) => a.manifestUrl.contains('torrentio'))) {
         try {
           final client = ref.read(addonClientProvider);
           final torrentio = await client.fetchManifest(BuiltInAddons.torrentioUrl);
