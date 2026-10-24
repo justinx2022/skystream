@@ -1,18 +1,12 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../network/dio_client_provider.dart';
 import '../models/addon_stream_source.dart';
-
-final directHlsServiceProvider = Provider<DirectHlsService>((ref) {
-  return DirectHlsService(ref.watch(dioClientProvider));
-});
 
 class DirectHlsService {
   final Dio _dio;
-  DirectHlsService(this._dio);
+  DirectHlsService([Dio? dio]) : _dio = dio ?? Dio();
 
   static const String _defaultUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -39,7 +33,7 @@ class DirectHlsService {
           options: Options(
             receiveTimeout: const Duration(seconds: 8),
             sendTimeout: const Duration(seconds: 8),
-            headers: {'Accept': 'application/json'},
+            headers: const {'Accept': 'application/json'},
           ),
           cancelToken: cancelToken,
         );
@@ -72,7 +66,7 @@ class DirectHlsService {
             options: Options(
               receiveTimeout: const Duration(seconds: 10),
               sendTimeout: const Duration(seconds: 10),
-              headers: {
+              headers: const {
                 'User-Agent': _defaultUserAgent,
                 'Referer': 'https://brightpathsignals.com/',
                 'Origin': 'https://brightpathsignals.com',
@@ -125,7 +119,7 @@ class DirectHlsService {
             options: Options(
               receiveTimeout: const Duration(seconds: 10),
               sendTimeout: const Duration(seconds: 10),
-              headers: {
+              headers: const {
                 'User-Agent': _defaultUserAgent,
                 'Referer': 'https://vixsrc.to',
                 'Origin': 'https://vixsrc.to',
@@ -143,7 +137,7 @@ class DirectHlsService {
               options: Options(
                 receiveTimeout: const Duration(seconds: 10),
                 sendTimeout: const Duration(seconds: 10),
-                headers: {
+                headers: const {
                   'User-Agent': _defaultUserAgent,
                   'Referer': 'https://vixsrc.to',
                 },

@@ -91,6 +91,7 @@ class AddonRepository extends _$AddonRepository {
         } catch (error) {
           if (kDebugMode) debugPrint('[AddonRepository] could not pre-seed Torrentio: $error');
         }
+        }
       }
       // Manifests can change (new catalogs, renamed rows), but the refresh is
       // not started from here: the launch runs [autoUpdate] once for every

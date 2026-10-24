@@ -476,7 +476,7 @@ class AddonStreamService {
       final hlsTask = () async {
         if (_ref != null) {
           try {
-            final hlsSources = await _ref.read(directHlsServiceProvider).resolveDirectStreams(
+            final hlsSources = await DirectHlsService().resolveDirectStreams(
               imdbId: effective.imdbId,
               type: effective.type,
               season: effective.season,
