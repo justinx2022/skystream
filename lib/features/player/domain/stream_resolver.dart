@@ -72,6 +72,19 @@ Map<String, String> playbackHeaders(StreamResult stream) {
   return headers;
 }
 
+/// The identity a source's playback results are remembered under.
+///
+/// Health belongs to the server that actually carried the video, so the
+/// provider name leads: the source label is often a quality or a bridge-
+/// specific tag shared by every provider, and scoring those together teaches
+/// the ranking nothing about which mirror is fast.
+String providerIdForStream(StreamResult stream, {String fallback = ''}) {
+  final name = stream.providerName.trim();
+  if (name.isNotEmpty && name.toLowerCase() != 'unknown') return name;
+  final source = stream.source.trim();
+  return source.isNotEmpty ? source : fallback;
+}
+
 /// Turns a resolved candidate into a URL an engine can actually open.
 ///
 /// Torrent playback is retired: this returns null for a torrent rather than
@@ -228,18 +241,35 @@ extension ProbeOutcomeReach on ProbeOutcome {
       this == ProbeOutcome.healthy || this == ProbeOutcome.unseekable;
 }
 
+/// What one speed-check request found, and how long the server took to say it.
+///
+/// Time-to-first-byte is the part of startup a source owns: DNS, TLS, redirects
+/// and the wait before the gateway answers. It does not promise the segments
+/// behind it are fast too, which is why a source that answers quickly still
+/// runs under the player's own no-picture watchdog.
+class _ProbeAnswer {
+  const _ProbeAnswer(this.outcome, this.ttfb);
+
+  final ProbeOutcome outcome;
+  final Duration ttfb;
+}
+
 /// Resolves [videoUrl] for [item] into playable streams.
 ///
 /// [preloadedStreams] short-circuits the plugin call, for callers that have
 /// already aggregated sources across plugins. Its order is taken as given —
 /// neither re-sorted nor overridden by watch history — so its first entry is
-/// what opens. Torrents are dropped from it: playback is direct-only.
+/// what opens unless it is slow. Torrents are dropped from it: playback is
+/// direct-only.
 ///
-/// [probeCandidates] is how many candidates are health-checked at once, in
-/// priority order, with a dead one's place going to the next in line until a
-/// healthy one is known - so a dead link fails over before the engine spins on
-/// a connect timeout. Pass 0 to skip probing. [probeBudget] caps how long that
-/// may take before playback starts on the best found so far.
+/// [probeCandidates] is how many mirrors are speed-checked at once, in
+/// priority order, with a dead one's place going to the next in line. The
+/// quickest of the preferred quality tier wins, so a title whose first mirror
+/// is slow starts on a fast one instead of waiting it out. That applies to a
+/// hand-picked list too: a tapped source answering when asked is opened as
+/// tapped, and only a tapped source that leaves the screen waiting gives its
+/// place to a quicker mirror of the same quality. Pass 0 to skip probing.
+/// [probeBudget] caps how long the check may hold up playback.
 ///
 /// [onCandidates] fires as soon as the ordered list exists; indices in every
 /// later report and in [ResolvedPlayback] are indices into that list.
@@ -351,7 +381,7 @@ Future<ResolvedPlayback> resolvePlayback({
       streams = health.rankSourcesByHealth<StreamResult>(
         sources: streams,
         getProviderId: (s) =>
-            s.source.isNotEmpty ? s.source : (provider?.packageName ?? ''),
+            providerIdForStream(s, fallback: provider?.packageName ?? ''),
       );
     } catch (_) {}
   }
@@ -362,6 +392,9 @@ Future<ResolvedPlayback> resolvePlayback({
   onCandidates?.call(streams);
 
   final saved = handPicked ? 0 : _savedStreamIndex(read, item, streams);
+  // A tapped source leads the race, so it opens unless it is slow: the check
+  // finishes on it the moment it answers, and only a source that makes the
+  // viewer wait hands over to a quicker mirror of the same tier.
   final index = probeCandidates <= 1
       ? saved
       : await _firstHealthyStream(
@@ -504,21 +537,37 @@ int _savedStreamIndex(
 /// none. Fifty dead links at up to six seconds a batch is minutes of spinner.
 const Duration kProbeBudget = Duration(seconds: 10);
 
-/// Checks candidates in priority order, [limit] at a time, and resolves as
-/// soon as the highest-priority healthy one is known - with [0,1,2], a
-/// healthy 0 returns immediately rather than waiting on 1 and 2.
+/// How many mirrors a speed check looks at when auto-selecting.
+///
+/// Four is enough to find a quick mirror in practice without probing a whole
+/// add-on list; every extra probe is another request competing with playback
+/// for the same connection.
+const int kSpeedProbeCandidates = 4;
+
+/// How long a speed check may hold up playback.
+///
+/// Only a mirror that has not answered by now is waited on; a preferred source
+/// that answers quickly opens immediately. The cap is deliberately below the
+/// time a single stalled link used to cost the engine.
+const Duration kSpeedProbeBudget = Duration(milliseconds: 1600);
+
+/// Speed-checks candidates in priority order, [limit] at a time, and opens the
+/// quickest reachable mirror of the preferred candidate's quality tier.
+///
+/// The check ends the moment its answer is settled: once the quickest source
+/// has answered, a probe still waiting has already spent longer at that link
+/// than the answer took, so it cannot be quicker. A fast list therefore pays
+/// only its own time to first byte, and a slow first mirror costs a fraction
+/// of the engine's connect timeout instead of the whole thing. Speed never
+/// promotes a lower tier over the one the ranking chose.
 ///
 /// Rolling: a candidate found dead hands its place to the next unchecked one
-/// in line, so the check keeps [limit] going until something answers - and
-/// carries on doing so after it has answered, in the background, for the ones
-/// still out: the source list shows every slot filled rather than a dead one
-/// left where it fell. It used to look at the top three and stop, which left
-/// a dead one among them unreplaced and, with all three dead, opened the
-/// first of them anyway. Completing the caller's `abandon` stops it.
+/// in line, so the source list shows every slot filled rather than a dead one
+/// left where it fell. Completing the caller's `abandon` stops it.
 ///
 /// Falls back to [startIndex] if every candidate fails, so a wrong probe never
-/// blocks playback outright, and to the best found so far once [budget] runs
-/// out.
+/// blocks playback outright, and to the quickest found so far once [budget]
+/// runs out.
 Future<int> _firstHealthyStream(
   List<StreamResult> streams, {
   required int startIndex,
@@ -540,10 +589,16 @@ Future<int> _firstHealthyStream(
   if (order.length <= 1) return start;
 
   final completer = Completer<int>();
-  final results = <int, bool>{};
+  // The answer and how long the server took to give it, so several working
+  // mirrors can be compared instead of opening whichever answered first.
+  final results = <int, _ProbeAnswer>{};
   var dispatched = 0;
   var abandoned = false;
   Timer? deadline;
+  // When each probe went out, so one still waiting can be ruled out once it
+  // has spent longer at its link than the quickest answer took.
+  final sentAt = <int, Duration>{};
+  final clock = Stopwatch()..start();
 
   /// Ends the check on [index]. The deadline goes in the same breath, not
   /// after the caller wakes: a probe answering as the screen closes would
@@ -554,50 +609,93 @@ Future<int> _firstHealthyStream(
     completer.complete(index);
   }
 
-  /// The best answer the check has actually produced: the highest-priority
-  /// healthy candidate, or [start] when there is none.
-  int bestSoFar() {
+  /// The fastest reachable candidate in the leading candidate's quality tier.
+  ///
+  /// Tier first, speed second: the list was ordered for the viewer's quality
+  /// preference, and a 720p mirror answering 50 ms sooner is not a better
+  /// choice than the 1080p the ranking asked for.
+  int? fastestReached() {
+    int? lead;
     for (final c in order) {
-      if (results[c] ?? false) return c;
+      final answer = results[c];
+      if (answer != null && answer.outcome.reached) {
+        lead = c;
+        break;
+      }
     }
-    return start;
+    if (lead == null) return null;
+
+    final tier = qualityBadgeLabel(streams[lead]);
+    var best = lead;
+    for (final c in order) {
+      final answer = results[c];
+      if (answer == null || !answer.outcome.reached) continue;
+      if (qualityBadgeLabel(streams[c]) != tier) continue;
+      if (answer.ttfb < results[best]!.ttfb) best = c;
+    }
+    return best;
+  }
+
+  /// Whether a probe still in flight could yet be quicker than [best].
+  ///
+  /// A probe that has already spent longer waiting than the best answer took
+  /// cannot beat it: the wait so far is a lower bound on its own time to first
+  /// byte. Only a replacement dispatched behind a failed candidate can still
+  /// be young enough to keep the check open.
+  bool couldStillWin(int best) {
+    final bestTtfb = results[best]!.ttfb;
+    for (final c in order.take(dispatched)) {
+      if (results.containsKey(c)) continue;
+      final sent = sentAt[c];
+      if (sent == null || clock.elapsed - sent < bestTtfb) return true;
+    }
+    return false;
   }
 
   void decide() {
     if (completer.isCompleted) return;
-    // Dispatch follows priority, so nothing undispatched can outrank what is.
-    for (final c in order.take(dispatched)) {
-      final answer = results[c];
-      if (answer == null) return; // a better one is still in flight
-      if (answer) {
-        finish(c);
-        return;
-      }
+    // The quickest answer wins as soon as nothing could still beat it.
+    final best = fastestReached();
+    if (best != null && !couldStillWin(best)) {
+      finish(best);
+      return;
     }
-    if (dispatched == order.length) finish(start); // all failed
+    // Nothing has answered yet, or a late replacement could still win: give
+    // the probes in flight until they answer; only the budget may cut that
+    // short.
+    for (final c in order.take(dispatched)) {
+      if (!results.containsKey(c)) return;
+    }
+    finish(best ?? start);
   }
 
   late final void Function() dispatchNext;
 
-  void record(int idx, ProbeOutcome outcome) {
+  void record(int idx, _ProbeAnswer answer) {
     // Reported before the completion guard, so a candidate that answers after
     // the check is over still explains itself rather than staying "trying"
     // on screen forever.
-    onProbe?.call(idx, outcome);
-    results[idx] = outcome.reached;
+    onProbe?.call(idx, answer.outcome);
+    results[idx] = answer;
     // Also once decided: the replacement is for the list, not the choice.
-    if (!outcome.reached && !abandoned) dispatchNext();
+    if (!answer.outcome.reached && !abandoned) dispatchNext();
     decide();
   }
 
   dispatchNext = () {
     if (dispatched >= order.length) return;
     final idx = order[dispatched++];
+    sentAt[idx] = clock.elapsed;
     onProbe?.call(idx, ProbeOutcome.trying);
     unawaited(
-      _probe(streams[idx])
-          .then((outcome) => record(idx, outcome))
-          .catchError((_) => record(idx, ProbeOutcome.unhealthy)),
+      _probeAnswer(streams[idx])
+          .then((answer) => record(idx, answer))
+          .catchError(
+            (_) => record(
+              idx,
+              const _ProbeAnswer(ProbeOutcome.unhealthy, Duration.zero),
+            ),
+          ),
     );
   };
 
@@ -620,7 +718,7 @@ Future<int> _firstHealthyStream(
       }),
     );
   }
-  deadline = Timer(budget, () => finish(bestSoFar()));
+  deadline = Timer(budget, () => finish(fastestReached() ?? start));
 
   for (var i = 0; i < limit; i++) {
     dispatchNext();
@@ -660,14 +758,25 @@ Future<ProbeOutcome> probeSource(StreamResult stream) => _probe(stream);
 /// video at all. A HEAD proves only the first, so it is the fallback rather
 /// than the lead: a server that refuses the ranged request but answers a
 /// plain one still counts as reachable, with nothing said about seeking.
-Future<ProbeOutcome> _probe(StreamResult stream) async {
-  if (isUncheckableSource(stream)) return ProbeOutcome.healthy;
+///
+/// The elapsed time to the response headers is carried back with the outcome;
+/// it is the part of startup the source controls.
+Future<ProbeOutcome> _probe(StreamResult stream) async =>
+    (await _probeAnswer(stream)).outcome;
+
+Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
+  if (isUncheckableSource(stream)) {
+    return const _ProbeAnswer(ProbeOutcome.healthy, Duration.zero);
+  }
 
   final uri = Uri.tryParse(stream.url);
-  if (uri == null || !uri.hasScheme) return ProbeOutcome.unhealthy;
+  if (uri == null || !uri.hasScheme) {
+    return const _ProbeAnswer(ProbeOutcome.unhealthy, Duration.zero);
+  }
   final headers = playbackHeaders(stream);
 
   final client = http.Client();
+  final clock = Stopwatch()..start();
   try {
     final request = http.Request('GET', uri);
     request.headers.addAll(headers);
@@ -676,9 +785,12 @@ Future<ProbeOutcome> _probe(StreamResult stream) async {
       () => 'bytes=0-${kProbeSniffBytes - 1}',
     );
     final resp = await client.send(request).timeout(const Duration(seconds: 2));
+    final ttfb = clock.elapsed;
     // Nothing to range over: an empty file, which the old one-byte check
     // passed too.
-    if (resp.statusCode == 416) return ProbeOutcome.healthy;
+    if (resp.statusCode == 416) {
+      return _ProbeAnswer(ProbeOutcome.healthy, ttfb);
+    }
     if (resp.statusCode < 400) {
       final type = resp.headers['content-type'];
       // Only a page or a playlist is worth reading; a server that ignores the
@@ -689,7 +801,7 @@ Future<ProbeOutcome> _probe(StreamResult stream) async {
               onTimeout: () => const <int>[],
             )
           : const <int>[];
-      return _outcomeOf(uri, resp, head);
+      return _ProbeAnswer(_outcomeOf(uri, resp, head), ttfb);
     }
   } catch (_) {
     // Fall through to the HEAD.
@@ -698,15 +810,18 @@ Future<ProbeOutcome> _probe(StreamResult stream) async {
     client.close();
   }
 
+  final headClock = Stopwatch()..start();
   try {
     final resp = await http
         .head(uri, headers: headers)
         .timeout(const Duration(seconds: 2));
-    if (resp.statusCode < 400) return ProbeOutcome.healthy;
+    if (resp.statusCode < 400) {
+      return _ProbeAnswer(ProbeOutcome.healthy, headClock.elapsed);
+    }
   } catch (_) {
     // No answer to either.
   }
-  return ProbeOutcome.unhealthy;
+  return const _ProbeAnswer(ProbeOutcome.unhealthy, Duration.zero);
 }
 
 /// What an answer to the ranged GET says about playing [url].

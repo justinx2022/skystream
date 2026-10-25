@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../../core/services/local_proxy_service.dart';
+import '../../../../core/services/provider_health_service.dart';
 import '../../../../core/utils/app_utils.dart';
 import '../../../../core/utils/stream_quality_sorter.dart';
 import '../../domain/stream_resolver.dart';
@@ -75,6 +76,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   Timer? _errorRecoveryTimer;
   Timer? _trackSwitchWatchdog;
   DateTime? _trackSettlingUntil;
+  Timer? _startupWatchdog;
+  DateTime? _attemptOpenedAt;
+  Duration _attemptStartAt = Duration.zero;
+  bool _attemptReachedPicture = false;
+  String _attemptProviderId = '';
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -268,6 +274,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
+    _attemptOpenedAt = null;
+    _attemptReachedPicture = false;
+    _attemptProviderId = '';
     _trackSettlingUntil = null;
     _openToken++;
 
@@ -302,6 +313,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         // an idle video does.
         _position = pos;
         _maybeRecordProgress(pos);
+
+        // First movement of the clock is the source's successful start. The
+        // delay keeps the previous media's last ticks from being read as the
+        // new one's; the watchdog only waits for the same movement.
+        final openedAt = _attemptOpenedAt;
+        if (!_attemptReachedPicture &&
+            openedAt != null &&
+            DateTime.now().difference(openedAt) >=
+                const Duration(milliseconds: 600) &&
+            pos > _attemptStartAt + const Duration(milliseconds: 400)) {
+          _attemptReachedPicture = true;
+          _startupWatchdog?.cancel();
+          _startupWatchdog = null;
+          _recordProviderHealth(
+            success: true,
+            responseTime: DateTime.now().difference(openedAt),
+          );
+        }
 
         final remaining = _duration - pos;
 
@@ -417,8 +446,55 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (_disposed || !mounted) return;
       final state = _player.state;
       if (state.playing) return;
+      _recordProviderHealth(success: false, reason: 'playback error');
       _failoverNext();
     });
+  }
+
+  /// Arms the backstop for a source that opens but never draws.
+  ///
+  /// Nine seconds without the clock moving is well past a cold HLS start and
+  /// far short of the engine's own patience; when another mirror exists,
+  /// moving to it beats leaving the viewer on a spinner. The last candidate is
+  /// left alone: a list that is slow everywhere still deserves its chance.
+  void _armStartupWatchdog(int token) {
+    _startupWatchdog?.cancel();
+    _attemptOpenedAt = DateTime.now();
+    _startupWatchdog = Timer(const Duration(seconds: 9), () {
+      if (_disposed || !mounted || token != _openToken) return;
+      if (_attemptReachedPicture || _isSettlingTrackChange) return;
+      final streams = _resolved?.streams ?? _candidates;
+      if (_attemptIndex + 1 >= streams.length) return;
+      _recordProviderHealth(
+        success: false,
+        reason: 'no picture within nine seconds',
+      );
+      _failoverNext();
+    });
+  }
+
+  /// Feeds the source-selection ranking what actually happened. Elapsed time
+  /// here is time to first picture, which is the number a viewer feels - not
+  /// how quickly the add-on listed the link.
+  void _recordProviderHealth({
+    required bool success,
+    Duration? responseTime,
+    String? reason,
+  }) {
+    final id = _attemptProviderId;
+    if (id.isEmpty) return;
+    final enabled =
+        ref.read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
+            true;
+    if (!enabled) return;
+    try {
+      final health = ref.read(providerHealthServiceProvider);
+      if (success) {
+        health.recordSuccess(id, responseTime: responseTime);
+      } else {
+        health.recordFailure(id, reason: reason);
+      }
+    } catch (_) {}
   }
 
   double get _bufferRatio {
@@ -471,8 +547,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         item: _item,
         videoUrl: _currentVideoUrl,
         preloadedStreams: _currentVideoUrl == widget.videoUrl ? widget.preloadedStreams : null,
-        probeCandidates: 1,
-        probeBudget: const Duration(milliseconds: 1200),
+        // The first few mirrors are speed-raced, including a tapped one: an
+        // answer opens as picked, and only a source that leaves the screen
+        // waiting gives its place to a quicker mirror of the same quality.
+        probeCandidates: kSpeedProbeCandidates,
+        probeBudget: kSpeedProbeBudget,
         isCancelled: () => _disposed,
         onCandidates: (streams) {
           if (mounted) setState(() => _candidates = streams);
@@ -520,11 +599,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   /// Opens [index] on the engine.
   ///
-  /// The chosen candidate is opened as it is. There is no reachability race
-  /// and no second health check: resolution has already picked it, and a HEAD
-  /// storm delayed the first picture by seconds while adding nothing the
-  /// engine's own request would not discover. A URL the engine rejects gets
-  /// one retry through the local proxy before failover.
+  /// Resolution has already picked it: a tapped source that answered opens as
+  /// tapped, and only one that left the check waiting was replaced by a
+  /// quicker mirror. A URL the engine rejects gets one retry through the
+  /// local proxy before failover.
   Future<void> _openCandidate(int index, {Duration startAt = Duration.zero}) async {
     final streams = _resolved?.streams ?? _candidates;
     if (streams.isEmpty) return;
@@ -569,6 +647,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         ? startAt
         : null;
 
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
+    _attemptOpenedAt = null;
+    _attemptStartAt = at ?? Duration.zero;
+    _attemptReachedPicture = false;
+    _attemptProviderId = providerIdForStream(
+      stream,
+      fallback: _item.provider ?? '',
+    );
+
     try {
       if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
@@ -578,6 +666,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
       await _player.open(Media(url, httpHeaders: headers, start: at), play: true);
       if (_disposed || !mounted || token != _openToken) return;
+      _armStartupWatchdog(token);
       setState(() {
         if (_player.state.playing) {
           _isLoading = false;
@@ -589,6 +678,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (kDebugMode) debugPrint('[MediaKit] Failed to open stream $index: $e');
       if (_disposed || !mounted || token != _openToken) return;
       if (await _tryProxyFallback(url, headers, at, token)) return;
+      _recordProviderHealth(success: false, reason: 'could not open: $e');
       _failoverNext();
     }
   }
@@ -615,6 +705,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         play: true,
       );
       if (_disposed || !mounted || token != _openToken) return true;
+      _armStartupWatchdog(token);
       setState(() {
         if (_player.state.playing) {
           _isLoading = false;
@@ -1063,6 +1154,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _hideControlsTimer?.cancel();
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
+    _startupWatchdog?.cancel();
     for (final s in _subscriptions) {
       s.cancel();
     }

@@ -1752,9 +1752,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         _attemptIndex < resolved.streams.length) {
       try {
         final stream = resolved.streams[_attemptIndex];
-        final pid = stream.source.isNotEmpty
-            ? stream.source
-            : (widget.item.provider ?? '');
+        final pid = providerIdForStream(
+          stream,
+          fallback: widget.item.provider ?? '',
+        );
         _read(providerHealthServiceProvider).recordFailure(pid, reason: reason);
       } catch (_) {}
     }
@@ -2288,9 +2289,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
             _attemptIndex < resolved.streams.length) {
           try {
             final stream = resolved.streams[_attemptIndex];
-            final pid = stream.source.isNotEmpty
-                ? stream.source
-                : (widget.item.provider ?? '');
+            final pid = providerIdForStream(
+              stream,
+              fallback: widget.item.provider ?? '',
+            );
             _read(providerHealthServiceProvider).recordSuccess(pid);
           } catch (_) {}
         }
