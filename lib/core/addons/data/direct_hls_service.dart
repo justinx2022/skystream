@@ -93,8 +93,6 @@ class DirectHlsService {
                     url: u,
                     proxyHeaders: const {
                       'User-Agent': _defaultUserAgent,
-                      'Referer': 'https://brightpathsignals.com/',
-                      'Origin': 'https://brightpathsignals.com',
                     },
                   ));
                 }

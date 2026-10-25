@@ -837,12 +837,11 @@ class LocalProxyService {
     // Default Referer if missing or proxy-based
     final existingReferer = req.headers['Referer']?.join("");
     if (existingReferer == null || existingReferer.contains("127.0.0.1")) {
-      final uri = Uri.parse(targetUrl);
       final optReferer = options?.referer;
-      if (optReferer != null) {
+      if (optReferer != null && optReferer.isNotEmpty) {
         req.headers.set("Referer", optReferer);
       } else {
-        req.headers.set("Referer", "${uri.scheme}://${uri.host}/");
+        req.headers.removeAll("Referer");
       }
     }
 

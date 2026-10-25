@@ -162,12 +162,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           await native.setProperty('scale', 'bilinear');
           await native.setProperty('cscale', 'bilinear');
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
-          // Mobile cache tuning (smooth, zero memory/bus saturation)
+          // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '20');
-          await native.setProperty('demuxer-max-bytes', '67108864');  // 64 MiB
-          await native.setProperty('demuxer-max-back-bytes', '4194304'); // 4 MiB
-          await native.setProperty('demuxer-readahead-secs', '15');
+          await native.setProperty('cache-secs', '120');
+          await native.setProperty('demuxer-max-bytes', '268435456');  // 256 MiB
+          await native.setProperty('demuxer-max-back-bytes', '33554432'); // 32 MiB
+          await native.setProperty('demuxer-readahead-secs', '60');
           // CRITICAL: Stop libmpv from deep probing on local loopback
           await native.setProperty('demuxer-lavf-probesize', '500000');
           await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
@@ -194,12 +194,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           await native.setProperty('framedrop', 'vo');
           await native.setProperty('video-sync', 'audio');
 
-          // Low-latency caching for instant start + local loopback optimization
+          // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '20');              // 20s ring buffer
-          await native.setProperty('demuxer-max-bytes', '67108864');  // 64 MiB
-          await native.setProperty('demuxer-max-back-bytes', '4194304'); // 4 MiB
-          await native.setProperty('demuxer-readahead-secs', '15');   // 15s ahead
+          await native.setProperty('cache-secs', '120');              // 120s ring buffer
+          await native.setProperty('demuxer-max-bytes', '268435456');  // 256 MiB
+          await native.setProperty('demuxer-max-back-bytes', '33554432'); // 32 MiB
+          await native.setProperty('demuxer-readahead-secs', '60');   // 60s ahead
 
           // CRITICAL: Stop libmpv from deep probing on local loopback
           await native.setProperty('demuxer-lavf-probesize', '500000');    // 500KB max probe
@@ -561,32 +561,52 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
 
     try {
-      // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via LocalProxy
-      // (bypasses all torrent logic, starts in <800ms)
+      // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via native mpv
+      // (bypasses all torrent logic and proxy overhead, max line speed throughput)
       if (index == 0 && (stream.url.contains('.m3u8') || 
           stream.url.contains('/hls/') || 
           stream.url.contains('/stream/') ||
           stream.url.contains('.m3u'))) {
         try {
-          await LocalProxyService.instance.startServer();
-          final proxyUrl = LocalProxyService.instance.getProxyUrl(
-            stream.url,
-            headers: playbackHeaders(stream),
-          );
+          final headers = playbackHeaders(stream);
+          if (_player.platform is NativePlayer) {
+            final native = _player.platform as NativePlayer;
+            final referer = headers['Referer'] ?? headers['referer'];
+            await native.setProperty('referer', referer ?? '');
+          }
 
           final media = Media(
-            proxyUrl,
-            httpHeaders: playbackHeaders(stream),
+            stream.url,
+            httpHeaders: headers,
             start: startAt > Duration.zero ? startAt : null,
           );
           await _player.open(media, play: true);
           await _player.play();
           if (!mounted) return;
           setState(() => _isLoading = false);
-          return; // SUCCESS - HLS playing instantly
+          return; // SUCCESS - Direct native HLS streaming at full network speed
         } catch (e) {
-          if (kDebugMode) debugPrint('[MediaKit] HLS direct play failed, falling back: $e');
-          // Fall through to normal logic
+          if (kDebugMode) debugPrint('[MediaKit] Native HLS direct play failed, trying proxy fallback: $e');
+          try {
+            await LocalProxyService.instance.startServer();
+            final proxyUrl = LocalProxyService.instance.getProxyUrl(
+              stream.url,
+              headers: playbackHeaders(stream),
+            );
+
+            final media = Media(
+              proxyUrl,
+              httpHeaders: playbackHeaders(stream),
+              start: startAt > Duration.zero ? startAt : null,
+            );
+            await _player.open(media, play: true);
+            await _player.play();
+            if (!mounted) return;
+            setState(() => _isLoading = false);
+            return;
+          } catch (e2) {
+            if (kDebugMode) debugPrint('[MediaKit] HLS proxy fallback failed: $e2');
+          }
         }
       }
 
@@ -638,9 +658,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
-        if (referer != null && referer.isNotEmpty) {
-          await native.setProperty('referer', referer);
-        }
+        await native.setProperty('referer', referer ?? '');
       }
 
       final media = Media(
