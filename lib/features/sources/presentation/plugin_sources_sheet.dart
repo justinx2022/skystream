@@ -373,7 +373,10 @@ class _PluginSourcesSheetState extends ConsumerState<PluginSourcesSheet> {
 
   List<_Row> get _allRows {
     final rows = <_Row>[
-      for (final stream in _nuvioResult.streams) _Row(stream),
+      // Direct-only playback: a torrent row cannot be opened by either
+      // engine, so it is not offered as a candidate at all.
+      for (final stream in _nuvioResult.streams)
+        if (!stream.isTorrent) _Row(stream),
     ];
     rows.sort((a, b) {
       final byQuality = b.qualityScore.compareTo(a.qualityScore);

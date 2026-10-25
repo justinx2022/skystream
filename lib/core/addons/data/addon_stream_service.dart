@@ -9,7 +9,6 @@ import '../models/addon_stream_source.dart';
 import 'addon_client.dart';
 import 'debrid_service.dart';
 import 'direct_hls_service.dart';
-import '../../../features/settings/presentation/player_settings_provider.dart';
 
 part 'addon_stream_service.g.dart';
 
@@ -280,7 +279,6 @@ class AddonStreamService {
 
     final updates = StreamController<AddonStreamProgress>();
     final hasDebrid = _ref?.read(debridSettingsProvider).isConfigured ?? false;
-    final preferredStreamType = _ref?.read(playerSettingsProvider).asData?.value.preferredStreamType ?? PreferredStreamType.hlsDirect;
 
     // Best first, with links to some other film the add-on found last.
     List<AddonStreamSource> ranked() => rankAddonStreams(
@@ -288,7 +286,9 @@ class AddonStreamService {
       title: effective.title,
       year: effective.year,
       hasActiveDebrid: hasDebrid,
-      preferredStreamType: preferredStreamType,
+      // Playback is direct-only, so this is not a preference any more: a
+      // stored torrent choice must not demote the only kind that can open.
+      preferredStreamType: PreferredStreamType.hlsDirect,
     );
 
     AddonStreamProgress snapshot({bool loading = true}) {

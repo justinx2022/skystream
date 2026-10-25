@@ -28,7 +28,6 @@ import 'core/addons/data/addon_repository.dart';
 import 'core/models/extension_update_report.dart';
 import 'core/nuvio/data/nuvio_repository.dart';
 import 'features/extensions/widgets/extensions_sync_bridge.dart';
-import 'core/services/torrent_service.dart';
 import 'core/extensions/providers.dart';
 import 'core/providers/update_provider.dart';
 import 'core/widgets/update_dialog.dart';
@@ -142,11 +141,17 @@ class _AppRootState extends State<AppRoot> {
       await Future.wait([
         _storageService.init(),
         DohService.instance.init(),
-        if (Platform.isAndroid)
+      ]);
+      // Refresh-rate handoff is a platform round trip the first frame does not
+      // depend on. Off the launch path, the launch screen is up that much
+      // sooner and the switch happens behind it.
+      if (Platform.isAndroid) {
+        unawaited(
           FlutterDisplayMode.setHighRefreshRate().catchError((Object e) {
             if (kDebugMode) debugPrint("Error setting high refresh rate: $e");
           }),
-      ]);
+        );
+      }
       unawaited(LanSyncService.instance.start(_storageService));
 
       if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
@@ -246,21 +251,7 @@ class _MyAppState extends ConsumerState<MyApp> {
       unawaited(_loadInstalledExtensions());
       _checkAppUpdates();
       unawaited(_checkExtensionsUpdates());
-      // Pre-warm TorrServer in background for instant P2P playback (no debrid needed)
-      unawaited(_prewarmTorrentServer());
     });
-  }
-
-  /// Pre-warm TorrServer so first torrent play is instant (~3s vs ~15s cold)
-  Future<void> _prewarmTorrentServer() async {
-    await Future.delayed(const Duration(seconds: 2)); // Don't block launch
-    try {
-      final torrentService = ref.read(torrentServiceProvider);
-      await torrentService.start();
-      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warmed for instant P2P (DHT: 500, Peers: 80)');
-    } catch (e) {
-      if (kDebugMode) debugPrint('[SkyStream] TorrServer pre-warm failed: $e');
-    }
   }
 
   @override

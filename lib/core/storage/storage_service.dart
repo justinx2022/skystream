@@ -68,13 +68,20 @@ class StorageService {
     _hiveDir = supportDir.path;
     Hive.init(supportDir.path);
 
-    _libraryBox = await _safeOpenBox(kLibraryBox);
-    _settingsBox = await _safeOpenBox(kSettingsBox);
-    _extensionsBox = await _safeOpenBox(kExtensionsBox);
-    await _safeOpenBox(
-      kDownloadMetadataBox,
-    ); // Opened here; later reads go through Hive.box().
-    await initHistory();
+    // Five independent files. Opened one after another, the largest sets the
+    // launch time on its own; in parallel the cost is the slowest single read.
+    final boxes = await Future.wait([
+      _safeOpenBox(kLibraryBox),
+      _safeOpenBox(kSettingsBox),
+      _safeOpenBox(kExtensionsBox),
+      // Opened here; later reads go through Hive.box().
+      _safeOpenBox(kDownloadMetadataBox),
+      _safeOpenBox(kHistoryBox),
+    ]);
+    _libraryBox = boxes[0];
+    _settingsBox = boxes[1];
+    _extensionsBox = boxes[2];
+    _historyBox = boxes[4];
   }
 
   /// Opens a box, and if it will not open, preserves whatever is on disk
@@ -489,10 +496,6 @@ class StorageService {
   List<Map<String, dynamic>>? _cachedHistory;
   bool _historyCacheDirty = true;
   VoidCallback? onProgressSaved;
-
-  Future<void> initHistory() async {
-    _historyBox = await _safeOpenBox(kHistoryBox);
-  }
 
   Future<void> saveProgress(
     MultimediaItem item,

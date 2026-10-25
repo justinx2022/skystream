@@ -13,14 +13,11 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../../core/services/local_proxy_service.dart';
-import '../../../../core/providers/device_info_provider.dart';
-import '../../../../core/extensions/providers.dart';
-import '../../../../core/services/torrent_service.dart';
-import '../../domain/network_buffer.dart';
+import '../../../../core/utils/app_utils.dart';
+import '../../../../core/utils/stream_quality_sorter.dart';
 import '../../domain/stream_resolver.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../../details/presentation/details_controller.dart';
-import '../../domain/hls_video_length.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/episode_navigator.dart';
@@ -53,6 +50,7 @@ class MediaKitPlayerScreen extends ConsumerStatefulWidget {
 class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   late final Player _player;
   late final VideoController _videoController;
+  late final Future<void> _mpvConfig;
 
   late MultimediaItem _item;
   late String _currentVideoUrl;
@@ -61,17 +59,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   bool _nextEpisodeDeclined = false;
 
   final List<StreamSubscription> _subscriptions = [];
-  Timer? _bufferPollTimer;
   Duration? _dragPosition;
   bool _isDragging = false;
 
   bool _disposed = false;
   bool _isLoading = true;
   bool _isBuffering = false;
+  bool _isSwitching = false;
+  bool _hasPlayedOnce = false;
   String _error = '';
   List<StreamResult> _candidates = const [];
   ResolvedPlayback? _resolved;
   int _attemptIndex = 0;
+  int _openToken = 0;
+  Timer? _errorRecoveryTimer;
+  Timer? _trackSwitchWatchdog;
+  DateTime? _trackSettlingUntil;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -82,8 +85,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   double _playbackSpeed = 1.0;
   bool _isFullscreen = false;
   BoxFit _fit = BoxFit.contain;
-
-  bool _nextEpisodePreSeeded = false; // Track if next episode pre-seeding started
 
   PlaybackProgressRecorder? _recorder;
   PlaybackTracker? _tracker;
@@ -140,16 +141,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       ),
     );
 
-    _applyMpvOptimizations();
-    _applyTorrentBuffer(); // Apply user buffer settings to TorrServer
+    _mpvConfig = _applyMpvOptimizations();
     _listenPlayerStreams();
     _startPlayback();
     _startControlsTimer();
-
-    _bufferPollTimer = Timer.periodic(
-      const Duration(milliseconds: 800),
-      (_) => _updateBufferFromNative(),
-    );
   }
 
   Future<void> _applyMpvOptimizations() async {
@@ -219,82 +214,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
-  /// Apply user-configured buffer settings to TorrServer (matches VLC behavior)
-  Future<void> _applyTorrentBuffer() async {
-    final mb = resolveNetworkBufferMb(
-      ref.read(playerSettingsProvider).asData?.value.networkBufferMb,
-      ref.read(deviceProfileProvider).asData?.value.tier ?? DeviceTier.standard,
-      chosenDurationMinutes: ref.read(playerSettingsProvider).asData?.value.bufferDurationMinutes,
-    );
-    unawaited(
-      ref.read(torrentServiceProvider).applyBufferSettings(
-        cacheMb: mb,
-        readAheadPercent: torrentReadAheadPercent(mb),
-      ),
-    );
-  }
-
-  /// Pre-seed next episode torrent in background for instant "Next Episode"
-  /// Waits until current episode's buffer covers the end to avoid RAM contention
-  Future<void> _preSeedNextEpisode() async {
-    final nextEp = _nextEpisode;
-    if (nextEp == null) return;
-
-    // Wait until current episode is in final 45s AND buffer covers remainder
-    // This ensures libmpv has cached all of Episode 1 before we touch TorrServer
-    while (!_disposed && mounted) {
-      final remaining = _duration - _position;
-      final bufferedEnd = _buffer > _position ? _buffer : _position + _buffer;
-      final bufferCoversEnd = bufferedEnd >= _duration - const Duration(seconds: 5);
-      
-      if (remaining <= const Duration(seconds: 45) && bufferCoversEnd) break;
-      await Future.delayed(const Duration(seconds: 5));
-      if (_disposed || !mounted) return;
-    }
-    
-    if (_disposed || !mounted) return;
-
-    try {
-      final resolved = await resolvePlayback(
-        read: ref.read,
-        item: _item,
-        videoUrl: nextEp.url,
-        probeCandidates: 0,
-        isCancelled: () => _disposed,
-      );
-
-      for (final stream in resolved.streams) {
-        if (isTorrentSource(stream)) {
-          // Pre-seed WITHOUT changing global settings - just join swarm
-          await ref.read(torrentServiceProvider).getStreamUrl(stream.url);
-          if (kDebugMode) debugPrint('[SkyStream] Pre-seeded next episode (buffer-safe): ${nextEp.name}');
-          break;
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) debugPrint('[SkyStream] Pre-seed failed: $e');
-    }
-  }
-
-  Future<void> _updateBufferFromNative() async {
-    if (_disposed || !mounted) return;
-    if (_player.platform is NativePlayer) {
-      final native = _player.platform as NativePlayer;
-      try {
-        final cacheSecStr = await native.getProperty('demuxer-cache-time');
-        if (cacheSecStr != null) {
-          final secs = double.tryParse(cacheSecStr.toString());
-          if (secs != null && secs > 0) {
-            final cacheDur = Duration(milliseconds: (secs * 1000).toInt());
-            if (mounted && cacheDur != _buffer) {
-              setState(() => _buffer = cacheDur);
-            }
-          }
-        }
-      } catch (_) {}
-    }
-  }
-
   Episode? get _effectiveCurrentEpisode {
     if (_currentEpisode != null) return _currentEpisode;
     final episodes = _item.episodes ?? widget.item.episodes;
@@ -347,6 +266,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _tracker?.finish();
     _player.stop();
 
+    _errorRecoveryTimer?.cancel();
+    _trackSwitchWatchdog?.cancel();
+    _trackSettlingUntil = null;
+    _openToken++;
+
     setState(() {
       _currentEpisode = next;
       _currentVideoUrl = next.url;
@@ -354,13 +278,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _duration = Duration.zero;
       _buffer = Duration.zero;
       _isLoading = true;
+      _isSwitching = false;
+      _hasPlayedOnce = false;
       _error = '';
       _candidates = const [];
       _resolved = null;
       _attemptIndex = 0;
       _nextEpisodeOffer = null;
       _nextEpisodeDeclined = false;
-      _nextEpisodePreSeeded = false; // Reset for new episode
     });
 
     await _startPlayback();
@@ -370,7 +295,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _subscriptions.add(
       _player.stream.position.listen((pos) {
         if (_disposed || !mounted) return;
-        setState(() => _position = pos);
+        // Kept current for seeking, resume and progress either way; only the
+        // chrome draws it, so with the chrome away there is nothing to repaint.
+        // The player emits this several times a second, and rebuilding the
+        // whole screen for a number nobody can see is the most expensive thing
+        // an idle video does.
+        _position = pos;
         _maybeRecordProgress(pos);
 
         final remaining = _duration - pos;
@@ -384,10 +314,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           }
         }
 
-        // PRE-SEED NEXT EPISODE: Start torrent in background when 5 min remaining
-        if (_hasNextEpisode && !_nextEpisodePreSeeded && remaining > Duration.zero && remaining <= const Duration(minutes: 5)) {
-          _nextEpisodePreSeeded = true;
-          unawaited(_preSeedNextEpisode());
+        if (_controlsVisible || _isDragging) {
+          setState(() {});
         }
       }),
     );
@@ -414,6 +342,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           if (isPlaying) {
             _isLoading = false;
             _isBuffering = false;
+            _isSwitching = false;
+            _hasPlayedOnce = true;
           }
         });
       }),
@@ -422,6 +352,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _subscriptions.add(
       _player.stream.buffering.listen((isBuffering) {
         if (_disposed || !mounted) return;
+        // Rebuilding the demuxer for a newly chosen audio rendition briefly
+        // empties the buffer. Painting a spinner over the picture for that
+        // makes a normal track change look like a stall.
+        if (isBuffering && _isSettlingTrackChange) return;
         setState(() => _isBuffering = isBuffering);
       }),
     );
@@ -429,11 +363,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _subscriptions.add(
       _player.stream.completed.listen((completed) {
         if (_disposed || !mounted) return;
-        if (completed) {
-          _recordFinalProgress();
-          if (_hasNextEpisode && !_nextEpisodeDeclined) {
-            _advance();
-          }
+        if (!completed) return;
+        // A completed event arriving while a new source is opening is the
+        // stream we are leaving, not the one we are on.
+        if (_isLoading || _isSwitching || _isSettlingTrackChange) return;
+        _recordFinalProgress();
+        if (_hasNextEpisode && !_nextEpisodeDeclined) {
+          _advance();
         }
       }),
     );
@@ -442,9 +378,47 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _player.stream.error.listen((err) {
         if (_disposed || !mounted) return;
         if (kDebugMode) debugPrint('[MediaKit] Player Error: $err');
-        _failoverNext();
+        // libmpv reports an error while it rebuilds the demuxer for a track
+        // change. Failing over on that is what made track switching reload
+        // the whole link.
+        if (_isSettlingTrackChange) return;
+        _scheduleErrorRecovery();
       }),
     );
+  }
+
+  bool get _isSettlingTrackChange {
+    final until = _trackSettlingUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  void _holdThroughTrackChange() {
+    _trackSettlingUntil = DateTime.now().add(const Duration(seconds: 3));
+    final wasPlaying = _player.state.playing;
+    _trackSwitchWatchdog?.cancel();
+    if (!wasPlaying) return;
+    // If the engine comes out of a rendition change stopped rather than
+    // playing, nudge it once. A fatal rendition error re-reports outside the
+    // settle window and is handled by _scheduleErrorRecovery.
+    _trackSwitchWatchdog = Timer(const Duration(seconds: 3), () {
+      if (_disposed || !mounted) return;
+      if (_player.state.playing) return;
+      unawaited(_player.play());
+    });
+  }
+
+  /// Gives the engine a moment to recover from an error on its own, then
+  /// fails over only if it is genuinely stopped. A dropped segment often
+  /// produces an error and recovers; the old immediate failover turned that
+  /// into a visible reload.
+  void _scheduleErrorRecovery() {
+    _errorRecoveryTimer?.cancel();
+    _errorRecoveryTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (_disposed || !mounted) return;
+      final state = _player.state;
+      if (state.playing) return;
+      _failoverNext();
+    });
   }
 
   double get _bufferRatio {
@@ -528,6 +502,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       );
 
       final startPosition = resumePoint?.position ?? Duration.zero;
+      // mpv reads its hwdec, cache and demuxer limits when the media opens.
+      // These used to be applied without waiting, so the first open raced them
+      // and could start with defaults. Resolution has been running meanwhile,
+      // so awaiting here normally costs nothing.
+      await _mpvConfig;
+      if (_disposed) return;
       await _openCandidate(_attemptIndex, startAt: startPosition);
     } catch (e) {
       if (_disposed || !mounted) return;
@@ -538,143 +518,114 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
+  /// Opens [index] on the engine.
+  ///
+  /// The chosen candidate is opened as it is. There is no reachability race
+  /// and no second health check: resolution has already picked it, and a HEAD
+  /// storm delayed the first picture by seconds while adding nothing the
+  /// engine's own request would not discover. A URL the engine rejects gets
+  /// one retry through the local proxy before failover.
   Future<void> _openCandidate(int index, {Duration startAt = Duration.zero}) async {
     final streams = _resolved?.streams ?? _candidates;
-    if (index >= streams.length) {
+    if (streams.isEmpty) return;
+    if (index < 0 || index >= streams.length) {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _isSwitching = false;
           _error = 'All available sources failed to play.';
         });
       }
       return;
     }
 
-    _attemptIndex = index;
     final stream = streams[index];
+    // Resolution drops torrents, but a list built before that rule must not
+    // be able to send one to the engine.
+    if (isTorrentSource(stream)) {
+      _failoverNext();
+      return;
+    }
+
+    final switching = _hasPlayedOnce;
+    _attemptIndex = index;
+    _errorRecoveryTimer?.cancel();
+    final token = ++_openToken;
 
     if (mounted) {
       setState(() {
-        _isLoading = true;
+        if (switching) {
+          _isSwitching = true;
+        } else {
+          _isLoading = true;
+        }
         _error = '';
       });
     }
 
+    final headers = playbackHeaders(stream);
+    final url = AppUtils.normalizeUrl(stream.url);
+    final at = startAt > Duration.zero && !isLiveSource(_item, _currentVideoUrl)
+        ? startAt
+        : null;
+
     try {
-      // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via native mpv
-      // (bypasses all torrent logic and proxy overhead, max line speed throughput)
-      if (index == 0 && (stream.url.contains('.m3u8') || 
-          stream.url.contains('/hls/') || 
-          stream.url.contains('/stream/') ||
-          stream.url.contains('.m3u'))) {
-        try {
-          final headers = playbackHeaders(stream);
-          if (_player.platform is NativePlayer) {
-            final native = _player.platform as NativePlayer;
-            final referer = headers['Referer'] ?? headers['referer'];
-            await native.setProperty('referer', referer ?? '');
-          }
-
-          final media = Media(
-            stream.url,
-            httpHeaders: headers,
-            start: startAt > Duration.zero ? startAt : null,
-          );
-          await _player.open(media, play: true);
-          await _player.play();
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          return; // SUCCESS - Direct native HLS streaming at full network speed
-        } catch (e) {
-          if (kDebugMode) debugPrint('[MediaKit] Native HLS direct play failed, trying proxy fallback: $e');
-          try {
-            await LocalProxyService.instance.startServer();
-            final proxyUrl = LocalProxyService.instance.getProxyUrl(
-              stream.url,
-              headers: playbackHeaders(stream),
-            );
-
-            final media = Media(
-              proxyUrl,
-              httpHeaders: playbackHeaders(stream),
-              start: startAt > Duration.zero ? startAt : null,
-            );
-            await _player.open(media, play: true);
-            await _player.play();
-            if (!mounted) return;
-            setState(() => _isLoading = false);
-            return;
-          } catch (e2) {
-            if (kDebugMode) debugPrint('[MediaKit] HLS proxy fallback failed: $e2');
-          }
-        }
-      }
-
-      // PRIORITY 2: Race torrents + other sources
-      String? playable;
-      if (index == 0 && streams.length > 1) {
-        playable = await playableUrlForRace(read: ref.read, streams: streams)
-            .timeout(const Duration(seconds: 12), onTimeout: () => null);
-        if (playable != null) {
-          // Find which stream won the race
-          final winnerIndex = streams.indexWhere((s) => 
-            isTorrentSource(s) ? s.url == playable : s.url == playable);
-          if (winnerIndex != -1) _attemptIndex = winnerIndex;
-        }
-      }
-      
-      // Fallback to single source if race failed or not applicable
-      if (playable == null) {
-        playable = await playableUrlFor(read: ref.read, stream: stream)
-            .timeout(const Duration(seconds: 14), onTimeout: () => null);
-      }
-
-      if (_disposed || !mounted) return;
-
-      if (playable == null || playable.startsWith('magnet:')) {
-        throw Exception('Stream source is unavailable or unreachable');
-      }
-
-      final headers = playbackHeaders(stream);
-      String finalUrl = playable;
-
-      // Enable Multi-Connection Speed Booster for direct HLS (.m3u8) streams
-      final boosterEnabled =
-          ref.read(playerSettingsProvider).asData?.value.multiConnectionBooster ??
-          true;
-      final uri = Uri.tryParse(playable);
-      if (uri != null && uri.scheme.startsWith('http')) {
-        if (looksLikeHls(uri) && boosterEnabled) {
-          try {
-            await LocalProxyService.instance.startServer();
-            finalUrl = LocalProxyService.instance.getProxyUrl(
-              playable,
-              headers: headers,
-            );
-          } catch (_) {}
-        }
-      }
-
       if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
         await native.setProperty('referer', referer ?? '');
       }
 
-      final media = Media(
-        finalUrl,
-        httpHeaders: headers,
-        start: startAt > Duration.zero ? startAt : null,
-      );
-
-      await _player.open(media, play: true);
-      await _player.play();
-      if (_disposed || !mounted) return;
-
-      setState(() => _isLoading = false);
+      await _player.open(Media(url, httpHeaders: headers, start: at), play: true);
+      if (_disposed || !mounted || token != _openToken) return;
+      setState(() {
+        if (_player.state.playing) {
+          _isLoading = false;
+          _isSwitching = false;
+          _hasPlayedOnce = true;
+        }
+      });
     } catch (e) {
       if (kDebugMode) debugPrint('[MediaKit] Failed to open stream $index: $e');
+      if (_disposed || !mounted || token != _openToken) return;
+      if (await _tryProxyFallback(url, headers, at, token)) return;
       _failoverNext();
+    }
+  }
+
+  /// Retries an engine-rejected URL through the local proxy, which can hand
+  /// mpv a URL shape it accepts and carries the source's own headers on every
+  /// request.
+  Future<bool> _tryProxyFallback(
+    String url,
+    Map<String, String> headers,
+    Duration? at,
+    int token,
+  ) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.scheme.startsWith('http')) return false;
+    try {
+      await LocalProxyService.instance.startServer();
+      final proxyUrl = LocalProxyService.instance.getProxyUrl(
+        url,
+        headers: headers,
+      );
+      await _player.open(
+        Media(proxyUrl, httpHeaders: headers, start: at),
+        play: true,
+      );
+      if (_disposed || !mounted || token != _openToken) return true;
+      setState(() {
+        if (_player.state.playing) {
+          _isLoading = false;
+          _isSwitching = false;
+          _hasPlayedOnce = true;
+        }
+      });
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[MediaKit] Proxy fallback failed: $e');
+      return false;
     }
   }
 
@@ -801,25 +752,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     });
   }
 
-  Future<void> _rescanTracks() async {
-    if (_player.platform is NativePlayer) {
-      final native = _player.platform as NativePlayer;
-      // Temporarily increase probesize for deep scan
-      await native.setProperty('demuxer-lavf-probesize', '5000000'); // 5MB
-      await native.setProperty('demuxer-lavf-analyzeduration', '5000000'); // 5s
-      // Force track refresh
-      await native.setProperty('track-auto-selection', 'yes');
-      // Restore low-latency settings
-      await Future.delayed(const Duration(seconds: 2));
-      await native.setProperty('demuxer-lavf-probesize', '500000');
-      await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
-    }
-  }
-
   Future<void> _showAudioTrackDialog() async {
     _onUserActivity();
-    await _rescanTracks();  // FIXED: await before showing dialog
-    if (!mounted) return;
     final audioTracks = _player.state.tracks.audio;
     final current = _player.state.track.audio;
     showModalBottomSheet<void>(
@@ -866,8 +800,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                         ),
                         title: Text(label, style: const TextStyle(color: Colors.white)),
                         onTap: () {
-                          _player.setAudioTrack(t);
                           Navigator.pop(context);
+                          if (!isSelected) {
+                            _holdThroughTrackChange();
+                            _player.setAudioTrack(t);
+                          }
                         },
                       );
                     },
@@ -882,8 +819,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   Future<void> _showSubtitleTrackDialog() async {
     _onUserActivity();
-    await _rescanTracks();  // FIXED: await before showing dialog
-    if (!mounted) return;
     final subTracks = _player.state.tracks.subtitle;
     final current = _player.state.track.subtitle;
     showModalBottomSheet<void>(
@@ -920,8 +855,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                 ),
                 title: const Text('Off', style: TextStyle(color: Colors.white)),
                 onTap: () {
-                  _player.setSubtitleTrack(SubtitleTrack.no());
                   Navigator.pop(context);
+                  if (current.id != 'no' && current.id != null) {
+                    _holdThroughTrackChange();
+                    _player.setSubtitleTrack(SubtitleTrack.no());
+                  }
                 },
               ),
               Flexible(
@@ -940,8 +878,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       ),
                       title: Text(label, style: const TextStyle(color: Colors.white)),
                       onTap: () {
-                        _player.setSubtitleTrack(t);
                         Navigator.pop(context);
+                        if (!isSelected) {
+                          _holdThroughTrackChange();
+                          _player.setSubtitleTrack(t);
+                        }
                       },
                     );
                   },
@@ -954,9 +895,26 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
   }
 
+  /// The badge the control bar shows for what is playing, so the quality
+  /// control reads `1080p` rather than an unlabelled layers icon.
+  String get _currentQualityLabel {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return 'Sources';
+    final badge = qualityBadgeLabel(streams[_attemptIndex]);
+    return badge == 'Auto' ? 'Sources' : badge;
+  }
+
+  Future<void> _switchSource(int index) async {
+    if (_disposed || !mounted) return;
+    if (index == _attemptIndex && _player.state.playing) return;
+    await _openCandidate(index, startAt: _position);
+  }
+
   void _showSourcesDialog() {
     _onUserActivity();
     final streams = _resolved?.streams ?? _candidates;
+    if (streams.isEmpty) return;
+    final playingIndex = _attemptIndex;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF1E1E1E),
@@ -970,14 +928,21 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Padding(
-                padding: EdgeInsets.all(16),
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text(
-                  'Available Sources',
+                  'Quality & Sources',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'Switching keeps your place in the episode.',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),
               ),
               Flexible(
@@ -986,30 +951,66 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   itemCount: streams.length,
                   itemBuilder: (context, i) {
                     final s = streams[i];
-                    final isSelected = i == _attemptIndex;
+                    final isSelected = i == playingIndex;
+                    final quality = qualityBadgeLabel(s);
                     return ListTile(
                       leading: Icon(
                         isSelected ? Icons.play_arrow_rounded : Icons.stream_rounded,
                         color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
                       ),
-                      title: Text(
-                        s.displaySource,
-                        style: TextStyle(
-                          color: isSelected
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.white,
-                          fontWeight:
-                              isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
+                      title: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
+                                  : Colors.white10,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              quality,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              s.displaySource,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.white,
+                                fontWeight:
+                                    isSelected ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
+                      subtitle: isSelected
+                          ? const Text(
+                              'Now playing',
+                              style: TextStyle(color: Colors.white54, fontSize: 11),
+                            )
+                          : null,
                       onTap: () {
                         Navigator.pop(context);
-                        _openCandidate(i, startAt: _position);
+                        if (!isSelected) _switchSource(i);
                       },
                     );
                   },
                 ),
               ),
+              const SizedBox(height: 8),
             ],
           ),
         );
@@ -1060,7 +1061,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   void dispose() {
     _disposed = true;
     _hideControlsTimer?.cancel();
-    _bufferPollTimer?.cancel();
+    _errorRecoveryTimer?.cancel();
+    _trackSwitchWatchdog?.cancel();
     for (final s in _subscriptions) {
       s.cancel();
     }
@@ -1145,7 +1147,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   ),
 
                   // Subtle Buffering Indicator
-                  if (_isBuffering && !_isLoading && _error.isEmpty)
+                  if (_isBuffering && !_isLoading && !_isSwitching && _error.isEmpty)
                     const Center(
                       child: SizedBox(
                         width: 48,
@@ -1157,8 +1159,49 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       ),
                     ),
 
+                  // Mid-session source change: the picture stays up, so this
+                  // says what is happening without replacing the frame with
+                  // the full startup screen.
+                  if (_isSwitching && _error.isEmpty)
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              _currentQualityLabel == 'Sources'
+                                  ? 'Switching source…'
+                                  : 'Switching to $_currentQualityLabel…',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                   // Seamless / Stremio Startup Overlay
-                  if (_isLoading || _error.isNotEmpty)
+                  if ((_isLoading || _error.isNotEmpty) && !_isSwitching)
                     PlayerStartupView(
                       title: _item.title,
                       onPick: (index) => _openCandidate(index),
@@ -1508,10 +1551,33 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   ),
                   const SizedBox(width: 16),
                   if (_candidates.length > 1)
-                    IconButton(
-                      tooltip: 'Sources',
-                      icon: const Icon(Icons.layers_rounded, color: Colors.white, size: 24),
-                      onPressed: _showSourcesDialog,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: TextButton.icon(
+                        onPressed: _showSourcesDialog,
+                        icon: const Icon(
+                          Icons.layers_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        label: Text(
+                          _currentQualityLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.white10,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          minimumSize: const Size(0, 32),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
                     ),
                   IconButton(
                     tooltip: 'Audio Tracks',

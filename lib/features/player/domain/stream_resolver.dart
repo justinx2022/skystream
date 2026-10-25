@@ -74,126 +74,28 @@ Map<String, String> playbackHeaders(StreamResult stream) {
 
 /// Turns a resolved candidate into a URL an engine can actually open.
 ///
-/// Only torrents need work: the torrent service downloads and seeds a
-/// `magnet:` link or a `.torrent`, then serves it over loopback HTTP, and the
-/// engine plays that. The loopback hop means no headers are involved.
-///
-/// Returns null when the torrent could not be prepared, which the caller
-/// should surface rather than pass to the engine.
-Future<String?> playableUrlFor({
-  required ProviderReader read,
-  required StreamResult stream,
-}) async {
-  if (isTorrentSource(stream)) {
-    return read(torrentServiceProvider).getStreamUrl(stream.url);
-  }
+/// Torrent playback is retired: this returns null for a torrent rather than
+/// seeding it, so even a stale list cannot restart the torrent server. Every
+/// other source is already playable and only needs normalising.
+String? playableUrlFor(StreamResult stream) {
+  if (isTorrentSource(stream)) return null;
   return AppUtils.normalizeUrl(stream.url);
 }
 
-/// Whether this candidate has to go through the torrent service first.
+/// Whether this candidate is a torrent rather than something an engine can
+/// open directly.
 ///
 /// The path check is deliberately narrowed by [StreamResult.source]: a bare
 /// absolute path is normally a local file, and only a torrent-sourced one is a
-/// seeded file the service already knows about.
+/// seeded file the torrent service knows about.
 bool isTorrentSource(StreamResult stream) =>
-    stream.url.startsWith('magnet:') ||
-    stream.url.endsWith('.torrent') ||
+    isTorrentUrl(stream.url) ||
     (stream.url.startsWith('/') && stream.source.contains('Torrent'));
 
-/// RACE multiple sources in parallel - return first playable URL
-/// **Priority: Direct HTTP/HLS first (instant), Torrents last resort (slow ramp)**
-/// Losers self-cleanup via per-candidate hooks to avoid timing races
-Future<String?> playableUrlForRace({
-  required ProviderReader read,
-  required List<StreamResult> streams,
-}) async {
-  final torrentStreams = streams.where(isTorrentSource).take(3).toList();
-  final directStreams = streams.where((s) => !isTorrentSource(s)).take(5).toList(); // Try 5 direct
-
-  if (torrentStreams.isEmpty && directStreams.isEmpty) return null;
-
-  final completer = Completer<String?>();
-  String? winnerUrl;
-  String? winnerHash;
-
-  // PHASE 1: Race DIRECT streams first (HLS, HTTP, DASH) - 5s timeout
-  for (final stream in directStreams) {
-    unawaited(() async {
-      try {
-        final url = await _quickHeadCheck(stream.url)
-            .timeout(const Duration(seconds: 5), onTimeout: () => null);
-        if (url != null && !completer.isCompleted) {
-          winnerUrl = url;
-          completer.complete(url);
-        }
-      } catch (_) {}
-    }());
-  }
-
-  // Wait for direct phase to complete or timeout quickly
-  try {
-    return await completer.future.timeout(const Duration(seconds: 6));
-  } on TimeoutException {
-    // PHASE 2: Direct failed/timed out -> race torrents as fallback
-    if (torrentStreams.isEmpty) return winnerUrl; // No torrents to try
-    
-    // Reset for torrent phase
-    final torrentCompleter = Completer<String?>();
-    String? torrentWinnerUrl;
-    
-    for (final stream in torrentStreams) {
-      unawaited(() async {
-        try {
-          final url = await read(torrentServiceProvider)
-              .getStreamUrl(stream.url)
-              .timeout(const Duration(seconds: 8), onTimeout: () => null);
-          
-          if (url == null || url.startsWith('magnet:') || torrentCompleter.isCompleted) {
-            if (url != null && !url.startsWith('magnet:')) {
-              final hash = _extractHashFromStreamUrl(url);
-              if (hash != null) {
-                await read(torrentServiceProvider).removeTorrent(hash, drop: true);
-              }
-            }
-            return;
-          }
-          
-          torrentWinnerUrl = url;
-          winnerHash = _extractHashFromStreamUrl(url);
-          torrentCompleter.complete(url);
-        } catch (_) {}
-      }());
-    }
-    
-    try {
-      return await torrentCompleter.future.timeout(const Duration(seconds: 10));
-    } on TimeoutException {
-      return torrentWinnerUrl ?? winnerUrl; // Fallback to any direct winner
-    }
-  }
-}
-
-/// Extract torrent hash from stream URL like http://127.0.0.1:8090/stream/file.mkv?link=HASH&index=0&play
-String? _extractHashFromStreamUrl(String url) {
-  try {
-    final uri = Uri.parse(url);
-    return uri.queryParameters['link'];
-  } catch (_) {
-    return null;
-  }
-}
-
-/// Quick HEAD check for direct streams
-Future<String?> _quickHeadCheck(String url) async {
-  try {
-    final resp = await http.head(
-      Uri.parse(url),
-      headers: {'User-Agent': kDefaultBrowserUserAgent},
-    ).timeout(const Duration(seconds: 2));
-    if (resp.statusCode < 400) return url;
-  } catch (_) {}
-  return null;
-}
+/// Whether [url] itself names a torrent. Playback is direct-only, so this is a
+/// refusal rather than a hand-off to the torrent service.
+bool isTorrentUrl(String url) =>
+    url.startsWith('magnet:') || url.endsWith('.torrent');
 
 /// A URL that names itself as on-demand. Vetoes [_liveUrlShapes], because those
 /// are guesses and this is the source saying what it is: Xtream Codes serves
@@ -329,9 +231,9 @@ extension ProbeOutcomeReach on ProbeOutcome {
 /// Resolves [videoUrl] for [item] into playable streams.
 ///
 /// [preloadedStreams] short-circuits the plugin call, for callers that have
-/// already aggregated sources across plugins. It is taken as given — neither
-/// re-sorted, re-filtered nor overridden by watch history — so its first entry
-/// is what opens.
+/// already aggregated sources across plugins. Its order is taken as given —
+/// neither re-sorted nor overridden by watch history — so its first entry is
+/// what opens. Torrents are dropped from it: playback is direct-only.
 ///
 /// [probeCandidates] is how many candidates are health-checked at once, in
 /// priority order, with a dead one's place going to the next in line until a
@@ -369,8 +271,17 @@ Future<ResolvedPlayback> resolvePlayback({
     onCandidates?.call(streams);
     return ResolvedPlayback(streams: streams, index: 0);
   }
+  // A magnet or .torrent link used to be handed to the bundled torrent
+  // server. That is retired, so there is no fallback left to offer it.
+  if (isTorrentUrl(videoUrl)) {
+    throw const StreamResolutionException(
+      StreamResolutionFailure.nothingToPlay,
+    );
+  }
 
-  final preloaded = preloadedStreams ?? const <StreamResult>[];
+  final preloaded = (preloadedStreams ?? const <StreamResult>[])
+      .where((s) => !isTorrentSource(s))
+      .toList(growable: false);
   final provider = _resolveProvider(read, item);
   if (provider == null && preloaded.isEmpty) {
     throw const StreamResolutionException(StreamResolutionFailure.noProvider);
@@ -391,7 +302,9 @@ Future<ResolvedPlayback> resolvePlayback({
   } else {
     final sw = Stopwatch()..start();
     try {
-      raw = await provider!.loadStreams(videoUrl);
+      raw = (await provider!.loadStreams(videoUrl))
+          .where((s) => !isTorrentSource(s))
+          .toList(growable: false);
       sw.stop();
       try {
         read(providerHealthServiceProvider).recordSuccess(
@@ -420,9 +333,11 @@ Future<ResolvedPlayback> resolvePlayback({
   }
 
   // Ranking that list again opens a source nobody picked, and a filter can
-  // drop the picked one out of it altogether.
+  // drop the picked one out of it altogether - so a hand-picked list does not
+  // need the settings at all, and must not wait on a cold settings box for
+  // nothing.
   var didFallback = false;
-  final settings = await _playerSettings(read);
+  final settings = handPicked ? null : await _playerSettings(read);
   var streams = handPicked || settings == null
       ? raw
       : await _byQuality(raw, settings, (v) => didFallback = v);
@@ -467,29 +382,26 @@ Future<ResolvedPlayback> resolvePlayback({
   );
 }
 
-/// Local files, remote casts and torrents are already playable and never go
-/// through a plugin.
+/// Local files and remote casts are already playable and never go through a
+/// plugin.
 StreamResult? _directStream(MultimediaItem item, String videoUrl) {
-  final isTorrent =
-      item.provider == 'Torrent' ||
-      videoUrl.startsWith('magnet:') ||
-      videoUrl.endsWith('.torrent');
   final isDirect =
       item.provider == 'Remote' ||
       item.provider == 'Local' ||
       AppUtils.isLocalFile(videoUrl);
 
-  if (!isTorrent && !isDirect) return null;
+  if (!isDirect) return null;
   return StreamResult(
     url: videoUrl,
-    source: isTorrent ? 'Torrent' : 'Video',
+    source: 'Video',
     providerName: item.provider ?? 'Local',
     headers: const {},
   );
 }
 
 /// The plugin [resolvePlayback] would ask for [item]'s streams, or null when
-/// it would ask none: a local file, a torrent or a direct link plays as it is.
+/// it would ask none: a local file or direct link plays as it is, and a
+/// torrent has nothing left to play.
 ///
 /// For saying who is being waited on. Resolution itself does not go through
 /// this, but it answers from the same two functions, so the two cannot name
@@ -499,6 +411,7 @@ SkyStreamProvider? pluginFor(
   MultimediaItem item,
   String videoUrl,
 ) {
+  if (isTorrentUrl(videoUrl)) return null;
   if (_directStream(item, videoUrl) != null) return null;
   return _resolveProvider(read, item);
 }

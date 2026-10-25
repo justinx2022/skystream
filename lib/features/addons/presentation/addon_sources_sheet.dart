@@ -9,7 +9,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/addons/data/addon_playback_launcher.dart';
 import '../../../core/addons/data/addon_repository.dart';
 import '../../../core/addons/data/addon_stream_service.dart';
-import '../../../core/addons/data/debrid_service.dart';
 import '../../../core/addons/models/addon_meta.dart';
 import '../../../core/addons/models/addon_stream_source.dart';
 import '../../../core/domain/entity/multimedia_item.dart';
@@ -73,7 +72,6 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
   bool _showDetails = false;
   bool _hdOnly = false;
   _KindFilter _kind = _KindFilter.all;
-  String? _debridStatus;
 
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
@@ -177,6 +175,9 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
 
   List<AddonStreamSource> get _visible => _result.streams
       .where((s) {
+        // Playback is direct-only; a torrent row can no longer be played, and
+        // listing one only to refuse it is worse than not showing it.
+        if (s.isTorrent) return false;
         if (_hdOnly && s.qualityScore < 1080) return false;
         if (_downloadMode && (!s.isDirect || s.url == null)) {
           return false;
@@ -185,7 +186,6 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
         return switch (_kind) {
           _KindFilter.all => true,
           _KindFilter.direct => s.isDirect,
-          _KindFilter.torrent => s.isTorrent,
           _KindFilter.external => s.isExternal,
         };
       })
@@ -201,42 +201,8 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
     }
 
     final ordered = _playable;
-    var selected = stream;
-    if (stream.isTorrent && ref.read(debridSettingsProvider).isConfigured) {
-      setState(() => _debridStatus = 'Checking debrid…');
-      try {
-        final link = await ref
-            .read(debridServiceProvider)
-            .resolveMagnet(
-              stream.magnetUri ?? '',
-              preferredFilename: stream.filename,
-              onStatus: (status) {
-                if (mounted) setState(() => _debridStatus = status);
-              },
-            );
-        if (link != null) {
-          selected = AddonStreamSource(
-            addonId: stream.addonId,
-            addonName: stream.addonName,
-            url: link.url,
-            name: stream.name,
-            title: stream.title,
-            description: stream.description,
-            videoSize: link.sizeBytes ?? stream.videoSize,
-            filename: link.filename ?? stream.filename,
-            bingeGroup: stream.bingeGroup,
-            subtitles: stream.subtitles,
-          );
-        }
-      } catch (_) {
-        // Fall through to the magnet.
-      } finally {
-        if (mounted) setState(() => _debridStatus = null);
-      }
-    }
-
     final converter = ref.read(addonStreamConverterProvider);
-    final streams = converter.toStreamResults(ordered, selected: selected);
+    final streams = converter.toStreamResults(ordered, selected: stream);
     if (!mounted) return;
     if (streams.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -622,34 +588,6 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
               ],
             ),
           ),
-
-          if (_debridStatus != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                kSourceSheetGutter,
-                0,
-                kSourceSheetGutter,
-                4,
-              ),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _debridStatus!,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: cs.primary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
 
           if (_showDetails) _details(theme, cs),
 
@@ -1135,7 +1073,6 @@ class _SourceRowState extends State<_SourceRow> {
 enum _KindFilter {
   all('All'),
   direct('Direct'),
-  torrent('Torrent'),
   external('Opens app');
 
   const _KindFilter(this.label);
@@ -1144,7 +1081,6 @@ enum _KindFilter {
   bool matches(AddonStreamSource stream) => switch (this) {
     _KindFilter.all => true,
     _KindFilter.direct => stream.isDirect,
-    _KindFilter.torrent => stream.isTorrent,
     _KindFilter.external => stream.isExternal,
   };
 }

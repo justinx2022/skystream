@@ -224,7 +224,7 @@ class PlayerTracksTab extends StatelessWidget {
             _setTrack(context, () async {
               await sideCars?.select(null);
               await controller.disableSubtitle();
-            }, reseat: false),
+            }),
           ),
         ),
       if (empty)
@@ -302,45 +302,21 @@ class PlayerTracksTab extends StatelessWidget {
   /// A refusal also means the list has moved on - a stream renegotiated, a
   /// language dropped - since the id came from a list read once and held
   /// since. So the list is read again.
+  ///
+  /// Deliberately no seek afterwards: re-issuing the position to make the new
+  /// track start instantly flushes every stream, which is the rebuffer the
+  /// viewer sees as playback restarting. The engine starts the chosen track
+  /// at its own read point; that is a far smaller interruption.
   Future<void> _setTrack(
     BuildContext context,
-    Future<void> Function() call, {
-    bool reseat = true,
-  }) async {
+    Future<void> Function() call,
+  ) async {
     try {
       await call();
-      if (reseat) await _reseat();
     } on VlcPlayerException catch (_) {
       // The panel can be closed, or the list already re-read under us, while
       // the call is in flight; a reload then belongs to nobody.
       if (context.mounted) onTracksChanged();
-    }
-  }
-
-  /// Re-issues the current position so the new track starts here, now.
-  ///
-  /// A stream selected mid-playback begins at the demuxer's read point, which
-  /// sits a whole caching interval ahead of the picture, so the new track is
-  /// silent until the clock catches up to it. Seeking flushes every stream and
-  /// refills them together, which is what makes the switch land immediately -
-  /// the same thing a viewer discovers by scrubbing a little after switching.
-  ///
-  /// The cost is honest and deliberate: a short rebuffer in place of a longer
-  /// wrong-sounding one. It is also cheap now that a read-ahead buffer sits
-  /// under the demuxer, because a seek back to where we already are is served
-  /// from memory rather than from the network.
-  ///
-  /// Refused where a seek means nothing - a live feed has nowhere to go, and
-  /// an unseekable source would simply fail the call.
-  Future<void> _reseat() async {
-    final value = controller.value;
-    if (value.isLive || !value.isSeekable) return;
-    if (value.position <= Duration.zero) return;
-    try {
-      await controller.seekTo(value.position);
-    } on Object {
-      // A refused seek costs the immediacy, not the track change, which has
-      // already happened.
     }
   }
 

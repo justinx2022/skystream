@@ -398,10 +398,6 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   /// its failure restores this instead of walking the failover ladder.
   ({int index, Duration position})? _revertTo;
 
-  /// Whether the current attempt is a torrent, which is allowed far longer to
-  /// produce its first frame — it is waiting on pieces, not on a socket.
-  bool _attemptIsTorrent = false;
-
   /// How long the current attempt has been running, and how long since the
   /// position last moved. Together they are the watchdog's whole input.
   ///
@@ -640,13 +636,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   bool _showResumeHint = false;
   bool _resumeHintOffered = false;
 
-  /// Live torrent statistics, polled only while a torrent is actually playing.
+  /// Live torrent statistics. Playback is direct-only now, so these stay
+  /// null; the panel and file sheet read them defensively.
   TorrentStatus? _torrentStatus;
   Timer? _torrentPoll;
-
-  /// Guards against a slow poll overlapping the next tick, which would queue
-  /// requests against the torrent server rather than skipping a beat.
-  bool _pollingTorrent = false;
 
   /// The torrent file the viewer picked, and its server-side id. The label
   /// replaces the title, because inside a season pack "Show S02" says nothing
@@ -768,11 +761,6 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       ),
     );
 
-    // The same buffer to the other engine. Here rather than at torrent setup
-    // because this is the one place that has the settings and the device tier
-    // in hand, and the server may be started later by a source resolver that
-    // has neither.
-    _applyTorrentBuffer();
     _controller = VlcPlayerController(
       autoPlay: true,
       // Native events are not throttled by default and position ticks are not
@@ -1238,107 +1226,16 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       }
     }
 
-    // A torrent has to be prepared and seeded before anything can open it, and
-    // that can take a while on a cold magnet - so say so rather than sitting on
-    // a blank screen.
-    final isTorrent = isTorrentSource(stream);
-    // A file picked out of a pack is served over plain http by the torrent
-    // server, so isTorrentSource no longer sees it - but it still needs the
-    // patient stall deadline while the piece cache fills.
-    _attemptIsTorrent = isTorrent || _torrentFileIndex != null;
-    if (isTorrent) _setStatus(_l10n?.playerPreparingTorrent ?? '');
-    if (isTorrent && _torrentPoll == null) {
-      _startedTorrent = true;
-      _startTorrentPolling();
-    }
-
-    // PRIORITY 1: Direct HLS/HTTP stream - play IMMEDIATELY via LocalProxy
-    // (bypasses all torrent logic, starts in <800ms)
-    String? playable;
-    if (_attemptIndex == 0 && _resolved != null && _resolved!.streams.length > 1 &&
-        (stream.url.contains('.m3u8') || 
-         stream.url.contains('/hls/') || 
-         stream.url.contains('/stream/') ||
-         stream.url.contains('.m3u'))) {
-      try {
-        await LocalProxyService.instance.startServer();
-        final proxyUrl = LocalProxyService.instance.getProxyUrl(
-          stream.url,
-          headers: playbackHeaders(stream),
-        );
-        final mediaUri = _playableUri(proxyUrl);
-        if (mediaUri != null) {
-          final headers = playbackHeaders(stream);
-          final deliverableUri = clearKey != null
-              ? await _decryptingUri(mediaUri, headers, clearKey)
-              : await _deliverableUri(mediaUri, headers);
-          if (!_disposed && generation == _generation) {
-            _lastStreamUrl = stream.url;
-            _isLive = isLiveSource(widget.item, stream.url);
-            await _controller.setMedia(
-              VlcMediaSource(
-                uri: deliverableUri,
-                httpHeaders: headers,
-                startPosition: startAt,
-                mediaOptions: <String>[
-                  if (_isLive) ...[
-                    ':live-caching=$kNetworkCachingMs',
-                    ':network-caching=$kNetworkCachingMs',
-                  ] else ...[
-                    ':network-caching=${Platform.isWindows ? 800 : 1500}',
-                    ':http-caching=${Platform.isWindows ? 800 : 1500}',
-                  ],
-                  if (Platform.isWindows) ...[
-                    ':avcodec-hw=any',
-                    ':directx-hw-yuv=1',
-                  ],
-                  if (_adaptiveMaxHeight != _deviceAdaptiveMaxHeight)
-                    ':adaptive-maxheight=$_adaptiveMaxHeight',
-                ],
-              ),
-              autoPlay: true,
-            );
-            if (!_disposed && generation == _generation) {
-              _handedToEngine = true;
-              _startAttemptClock();
-              if (!_isLive && looksLikeHls(deliverableUri)) {
-                _hlsMedia = (uri: deliverableUri, headers: headers);
-              }
-              return; // SUCCESS - HLS playing instantly
-            }
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('[VLC] HLS direct play failed, falling back: $e');
-        // Fall through to normal logic
-      }
-    }
-
-    // PRIORITY 2: Race torrents + other sources (only on first attempt)
-    if (_attemptIndex == 0 && _resolved != null && _resolved!.streams.length > 1) {
-      playable = await playableUrlForRace(read: _read, streams: _resolved!.streams)
-          .timeout(const Duration(seconds: 12), onTimeout: () => null);
-      if (playable != null) {
-        // Find which stream won the race
-        final winnerIndex = _resolved!.streams.indexWhere((s) => 
-          isTorrentSource(s) ? s.url == playable : s.url == playable);
-        if (winnerIndex != -1) {
-          _attemptIndex = winnerIndex;
-          // Recurse with winning stream
-          return _openAttempt(winnerIndex, startAt: startAt, retries: retries);
-        }
-      }
-    }
-    
-    // PRIORITY 3: Single source fallback
-    if (playable == null) {
-      playable = await playableUrlFor(read: _read, stream: stream);
-    }
+    // One path: hand the engine the candidate resolution chose. The old
+    // priority ladder raced a HEAD check across several candidates first,
+    // which cost seconds before the first frame and could redirect a picked
+    // quality to whichever other URL answered earliest.
+    final playable = playableUrlFor(stream);
     if (_disposed || generation != _generation) return;
     if (playable == null) {
       return _failAttempt(
-        _l10n?.playerReasonTorrentNotPrepared ??
-            'torrent could not be prepared',
+        _l10n?.playerReasonNoPlayableAddress ??
+            'source has no playable address',
       );
     }
 
@@ -2150,9 +2047,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       stalledFor: _stalledFor,
       hadFrames: _sawFrames,
       lastAction: _lastStallAction,
-      recoverAfter: _attemptIsTorrent
-          ? kTorrentStallRecoverAfter
-          : kStallRecoverAfter,
+      recoverAfter: kStallRecoverAfter,
       arriving: _bytesArriving,
       afterSeek: afterSeek,
     );
@@ -2662,33 +2557,6 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     current: _currentEpisode,
     videoUrl: _videoUrl,
   );
-
-  /// Polls the torrent server while a torrent is playing.
-  ///
-  /// The status is only meaningful while the engine is seeding, so polling
-  /// starts with playback rather than with the screen, and stops with it.
-  void _startTorrentPolling() {
-    _torrentPoll?.cancel();
-    _torrentPoll = Timer.periodic(const Duration(seconds: 3), (_) async {
-      if (_disposed || _pollingTorrent) return;
-      _pollingTorrent = true;
-      try {
-        final status = await _read(torrentServiceProvider).getCurrentStatus();
-        if (!_disposed && mounted) {
-          setState(() {
-            _torrentStatus = status;
-            // Equal file lists compare equal, so a poll that found nothing
-            // new never reaches the panel.
-            _publishPanelData();
-          });
-        }
-      } catch (e) {
-        if (kDebugMode) debugPrint('Torrent status poll failed: $e');
-      } finally {
-        _pollingTorrent = false;
-      }
-    });
-  }
 
   /// Picture-in-picture is an Android activity mode; there is no equivalent on
   /// the other platforms this ships to, and it is meaningless on a television.
@@ -3997,34 +3865,14 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     super.dispose();
   }
 
-  /// The buffer the viewer asked for, in megabytes.
-  ///
-  /// One number for both engines. libVLC takes it as a prefetch window and
-  /// TorrServer as its piece cache: a viewer who chose 256 MB meant it for
-  /// whatever they are watching, and a torrent used to ignore them for a
-  /// hard-coded 64.
+  /// The buffer the viewer asked for, in megabytes, as libVLC's prefetch
+  /// window.
   int get _bufferMb => resolveNetworkBufferMb(
     ref.read(playerSettingsProvider).asData?.value.networkBufferMb,
     ref.read(deviceProfileProvider).asData?.value.tier ?? DeviceTier.standard,
     chosenDurationMinutes:
         ref.read(playerSettingsProvider).asData?.value.bufferDurationMinutes,
   );
-
-  /// Hands the torrent server the same buffer, split so some of it stays
-  /// behind the playhead.
-  ///
-  /// Fire and forget: the server may not be up, may be about to be started by
-  /// a source resolver, or may not be involved at all on a direct stream. It
-  /// remembers either way, and nothing about playback waits on it.
-  void _applyTorrentBuffer() {
-    final mb = _bufferMb;
-    unawaited(
-      _read(torrentServiceProvider).applyBufferSettings(
-        cacheMb: mb,
-        readAheadPercent: torrentReadAheadPercent(mb),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {

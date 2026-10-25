@@ -299,17 +299,7 @@ class PlaybackLauncher {
 
     // Scrapers occasionally emit links padded with whitespace, and the URL
     // is the whole request the other app makes — it goes out trimmed.
-    String playUrl = stream.url.trim();
-    if (playUrl.startsWith("magnet:") ||
-        playUrl.endsWith(".torrent") ||
-        (playUrl.startsWith("/") && stream.source.contains("Torrent"))) {
-      final torrentUrl = await _ref
-          .read(torrentServiceProvider)
-          .getStreamUrl(playUrl);
-      if (torrentUrl != null) {
-        playUrl = torrentUrl;
-      }
-    }
+    final playUrl = stream.url.trim();
 
     final success = await service.launch(
       playUrl,

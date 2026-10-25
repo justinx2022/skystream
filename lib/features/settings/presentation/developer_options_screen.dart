@@ -75,12 +75,6 @@ class _DeveloperOptionsScreenState
                       deviceAsync.asData?.value.isTv ?? false,
                     ),
                   ),
-                  SettingsTile(
-                    icon: Icons.stream,
-                    title: l10n.streamTorrent,
-                    subtitle: l10n.streamTorrentSubtitle,
-                    onTap: () => _pickTorrentFile(context),
-                  ),
                   if (kDebugMode)
                     SettingsTile(
                       icon: Icons.folder_copy_rounded,
@@ -238,29 +232,5 @@ class _DeveloperOptionsScreenState
         videoUrl: url,
       ),
     ).push<void>(context);
-  }
-
-  Future<void> _pickTorrentFile(BuildContext context) async {
-    final picked = await FilePicker.pickFile(type: FileType.any);
-
-    if (picked?.path != null && context.mounted) {
-      final path = picked!.path!;
-      final name = picked.name;
-
-      unawaited(
-        PlayerRoute(
-          $extra: PlayerRouteExtra(
-            item: MultimediaItem(
-              title: name,
-              url: path,
-              posterUrl: '',
-              provider: AppLocalizations.of(context)!.torrent,
-              episodes: [Episode(name: name, url: path, posterUrl: '')],
-            ),
-            videoUrl: path,
-          ),
-        ).push<void>(context),
-      );
-    }
   }
 }
