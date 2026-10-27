@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
+import 'package:skystream/core/theme/app_backdrop_layer.dart';
 import 'package:skystream/core/utils/layout_constants.dart';
 import 'package:skystream/core/utils/responsive_breakpoints.dart';
 import 'package:skystream/shared/widgets/custom_bottom_nav.dart';
@@ -230,102 +231,108 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         );
 
         if (profile.isTv || context.isTabletOrLarger) {
-          return PopScope(
-            canPop: false,
-            onPopInvokedWithResult: (didPop, result) {
-              if (isAtDefaultHome) {
-                // Nothing is left to go back to. The shell's own route has
-                // nowhere to pop to, so an unhandled back press is a button
-                // that does nothing — the most common "the app is stuck"
-                // report on a television. Leave the app instead.
-                SystemNavigator.pop();
-              } else {
-                widget.navigationShell.goBranch(defaultIndex);
-              }
-            },
-            child: Listener(
-              behavior: HitTestBehavior.translucent,
-              onPointerDown: _onPointerDown,
-              onPointerHover: _onPointerHover,
-              onPointerMove: _onPointerMove,
-              child: MouseRegion(
-                key: kTvCursorRegionKey,
-                // Not opaque: `deferToChild` adds no hit target of its own, so
-                // taking the cursor away cannot take a tap away with it.
-                opaque: false,
-                onEnter: _onPointerEnter,
-                // Present in every frame, cursor value or not. Putting the
-                // MouseRegion into the tree only when it has something to say
-                // would remount the branch Navigator under it and throw away
-                // the scroll position of every screen in the shell.
-                cursor: _cursorHidden
-                    ? SystemMouseCursors.none
-                    : MouseCursor.defer,
-                child: Focus(
-                  canRequestFocus: false,
-                  skipTraversal: true,
-                  onKeyEvent: (node, event) {
-                    if (event is KeyDownEvent) {
-                      final key = event.logicalKey;
-                      if (key == LogicalKeyboardKey.arrowDown ||
-                          key == LogicalKeyboardKey.arrowUp ||
-                          key == LogicalKeyboardKey.arrowLeft ||
-                          key == LogicalKeyboardKey.arrowRight ||
-                          key == LogicalKeyboardKey.enter ||
-                          key == LogicalKeyboardKey.select ||
-                          key == LogicalKeyboardKey.space ||
-                          key == LogicalKeyboardKey.tab) {
-                        ref
-                            .read<DpadActiveNotifier>(
-                              isDpadActiveProvider.notifier,
-                            )
-                            .set(true);
+          return AppBackdropLayer(
+            child: PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, result) {
+                if (isAtDefaultHome) {
+                  // Nothing is left to go back to. The shell's own route has
+                  // nowhere to pop to, so an unhandled back press is a button
+                  // that does nothing — the most common "the app is stuck"
+                  // report on a television. Leave the app instead.
+                  SystemNavigator.pop();
+                } else {
+                  widget.navigationShell.goBranch(defaultIndex);
+                }
+              },
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _onPointerDown,
+                onPointerHover: _onPointerHover,
+                onPointerMove: _onPointerMove,
+                child: MouseRegion(
+                  key: kTvCursorRegionKey,
+                  // Not opaque: `deferToChild` adds no hit target of its own,
+                  // so taking the cursor away cannot take a tap away with it.
+                  opaque: false,
+                  onEnter: _onPointerEnter,
+                  // Present in every frame, cursor value or not. Putting the
+                  // MouseRegion into the tree only when it has something to say
+                  // would remount the branch Navigator under it and throw away
+                  // the scroll position of every screen in the shell.
+                  cursor: _cursorHidden
+                      ? SystemMouseCursors.none
+                      : MouseCursor.defer,
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onKeyEvent: (node, event) {
+                      if (event is KeyDownEvent) {
+                        final key = event.logicalKey;
+                        if (key == LogicalKeyboardKey.arrowDown ||
+                            key == LogicalKeyboardKey.arrowUp ||
+                            key == LogicalKeyboardKey.arrowLeft ||
+                            key == LogicalKeyboardKey.arrowRight ||
+                            key == LogicalKeyboardKey.enter ||
+                            key == LogicalKeyboardKey.select ||
+                            key == LogicalKeyboardKey.space ||
+                            key == LogicalKeyboardKey.tab) {
+                          ref
+                              .read<DpadActiveNotifier>(
+                                isDpadActiveProvider.notifier,
+                              )
+                              .set(true);
+                        }
                       }
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                  child: Material(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: SafeArea(
-                      bottom: false,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // Content in its own traversal group, positioned first (bottom layer)
-                          Positioned.fill(
-                            child: Padding(
-                              padding: const EdgeInsets.only(
-                                left: LayoutConstants.sidebarWidthCompact,
-                              ),
-                              child: FocusTraversalGroup(
-                                policy: WidgetOrderTraversalPolicy(),
-                                child: Focus(
-                                  canRequestFocus: false,
-                                  skipTraversal: true,
-                                  onKeyEvent: _onContentKeyEvent,
-                                  child: widget.navigationShell,
+                      return KeyEventResult.ignored;
+                    },
+                    // Transparent: [AppBackdropLayer] is what the shell is
+                    // painted on, chosen once above the whole branch.
+                    child: Material(
+                      color: Colors.transparent,
+                      child: SafeArea(
+                        bottom: false,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            // Content in its own traversal group, positioned
+                            // first (bottom layer)
+                            Positioned.fill(
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  left: LayoutConstants.sidebarWidthCompact,
+                                ),
+                                child: FocusTraversalGroup(
+                                  policy: WidgetOrderTraversalPolicy(),
+                                  child: Focus(
+                                    canRequestFocus: false,
+                                    skipTraversal: true,
+                                    onKeyEvent: _onContentKeyEvent,
+                                    child: widget.navigationShell,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          // Sidebar in its own traversal group, positioned second (top layer)
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: LayoutConstants.sidebarWidthCompact,
-                            child: FocusTraversalGroup(
-                              policy: WidgetOrderTraversalPolicy(),
-                              child: AppSidebar(
-                                currentIndex:
-                                    widget.navigationShell.currentIndex,
-                                onItemTapped: (int index) =>
-                                    _onItemTapped(index, context),
-                                focusNodes: _sidebarNodes,
+                            // Sidebar in its own traversal group, positioned
+                            // second (top layer)
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: LayoutConstants.sidebarWidthCompact,
+                              child: FocusTraversalGroup(
+                                policy: WidgetOrderTraversalPolicy(),
+                                child: AppSidebar(
+                                  currentIndex:
+                                      widget.navigationShell.currentIndex,
+                                  onItemTapped: (int index) =>
+                                      _onItemTapped(index, context),
+                                  focusNodes: _sidebarNodes,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -340,40 +347,45 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         final navBarTotalHeight = CustomBottomNavBar.height + bottomInset;
         final mq = MediaQuery.of(context);
 
-        return PopScope(
-          canPop: false,
-          onPopInvokedWithResult: (didPop, result) {
-            if (isAtDefaultHome) {
-              // Same rule as the television branch: at the default home the
-              // back button leaves the app instead of doing nothing.
-              SystemNavigator.pop();
-            } else {
-              widget.navigationShell.goBranch(defaultIndex);
-            }
-          },
-          child: Scaffold(
-            resizeToAvoidBottomInset: false,
-            extendBody: true,
-            body: MediaQuery(
-              data: mq.copyWith(
-                padding: mq.padding.copyWith(
-                  bottom: mq.padding.bottom + navBarTotalHeight,
+        return AppBackdropLayer(
+          child: PopScope(
+            canPop: false,
+            onPopInvokedWithResult: (didPop, result) {
+              if (isAtDefaultHome) {
+                // Same rule as the television branch: at the default home the
+                // back button leaves the app instead of doing nothing.
+                SystemNavigator.pop();
+              } else {
+                widget.navigationShell.goBranch(defaultIndex);
+              }
+            },
+            child: Scaffold(
+              // Transparent so the backdrop layer above shows through; the tab
+              // screens are transparent for the same reason.
+              backgroundColor: Colors.transparent,
+              resizeToAvoidBottomInset: false,
+              extendBody: true,
+              body: MediaQuery(
+                data: mq.copyWith(
+                  padding: mq.padding.copyWith(
+                    bottom: mq.padding.bottom + navBarTotalHeight,
+                  ),
+                  viewPadding: mq.viewPadding.copyWith(
+                    bottom: mq.viewPadding.bottom + navBarTotalHeight,
+                  ),
                 ),
-                viewPadding: mq.viewPadding.copyWith(
-                  bottom: mq.viewPadding.bottom + navBarTotalHeight,
+                child: widget.navigationShell,
+              ),
+              bottomNavigationBar: Padding(
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  bottom: bottomInset,
                 ),
-              ),
-              child: widget.navigationShell,
-            ),
-            bottomNavigationBar: Padding(
-              padding: EdgeInsets.only(
-                left: 24,
-                right: 24,
-                bottom: bottomInset,
-              ),
-              child: CustomBottomNavBar(
-                currentIndex: widget.navigationShell.currentIndex,
-                onTap: (index) => _onItemTapped(index, context),
+                child: CustomBottomNavBar(
+                  currentIndex: widget.navigationShell.currentIndex,
+                  onTap: (index) => _onItemTapped(index, context),
+                ),
               ),
             ),
           ),

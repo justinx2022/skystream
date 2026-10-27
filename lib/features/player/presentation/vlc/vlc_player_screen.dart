@@ -27,6 +27,7 @@ import '../../../../core/services/local_proxy_service.dart';
 import '../../../../core/storage/episode_watch_repository.dart';
 import '../../../../core/storage/history_repository.dart';
 import '../../../../core/utils/app_utils.dart';
+import '../../../../core/utils/stream_quality_sorter.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../domain/episode_navigator.dart';
 import '../../../skip/data/skip_service.dart';
@@ -535,6 +536,12 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     onUnreadable: _handSideCarToEngine,
   );
 
+  /// The controller as the overlaid subtitles' clock, kept for the life of the
+  /// screen so the view is not handed a new clock on every rebuild.
+  late final VlcSubtitlePlayback _subtitlePlayback = VlcSubtitlePlayback(
+    _controller,
+  );
+
   /// Whether Auto still owes this media its look for a subtitle in the
   /// viewer's language among the tracks inside the video - see
   /// [_pickPreferredSubtitle]. Armed per attempt, spent once the video has
@@ -942,12 +949,19 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       // [_onProbe] record, and a row picked during the probe race ends it.
       final seamless =
           _read(playerSettingsProvider).asData?.value.seamlessPlayback ?? true;
+      // Seamless playback already opens the first source without a race. Off
+      // that path the runner-up mirrors are checked, but never on a metered
+      // link: the check spends data before the picture starts, and failover
+      // still covers a source that turns out dead.
+      final probeCandidates = seamless
+          ? 1
+          : (await isOnMeteredNetwork() ? 1 : 3);
       final resolved = await resolvePlayback(
         read: _read,
         item: widget.item,
         videoUrl: _videoUrl,
         preloadedStreams: _preloaded,
-        probeCandidates: seamless ? 1 : 3,
+        probeCandidates: probeCandidates,
         probeBudget:
             seamless ? const Duration(milliseconds: 1200) : kProbeBudget,
         isCancelled: () => _disposed,
@@ -4061,7 +4075,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         return ValueListenableBuilder<bool>(
           valueListenable: _chrome,
           builder: (context, chromeUp, _) => SideCarSubtitleView(
-            controller: _controller,
+            playback: _subtitlePlayback,
             subtitles: _sideCars,
             settings: settings,
             bottomInset: chromeUp && controlsShown

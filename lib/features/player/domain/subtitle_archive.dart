@@ -23,6 +23,13 @@ const Set<String> _kSubtitleExtensions = {'srt', 'vtt', 'ass', 'ssa'};
 /// kilobytes even for a short episode.
 const int _kNoteBytes = 1024;
 
+/// Larger than this is not a subtitle. A full track is a few hundred
+/// kilobytes; an entry claiming gigabytes is a decompression bomb, and it
+/// matters here because the picker takes the largest entry in the archive -
+/// the bomb is exactly what it would choose, and expanding it would take the
+/// player down with it.
+const int _kMaxSubtitleBytes = 10 * 1024 * 1024;
+
 /// The entry of [entries] to show, or null when none will do.
 ///
 /// With an [episode], a file naming it is taken over the rest, and a pack
@@ -38,6 +45,7 @@ String? pickSubtitleEntry(
 }) {
   final subtitles = entries
       .where((entry) => _kSubtitleExtensions.contains(_extension(entry.name)))
+      .where((entry) => entry.size <= _kMaxSubtitleBytes)
       .toList();
   if (subtitles.isEmpty) return null;
 

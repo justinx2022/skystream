@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:collection/collection.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,19 +13,36 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/network/http_defaults.dart';
+import '../../../../core/providers/device_info_provider.dart';
 import '../../../../core/services/local_proxy_service.dart';
 import '../../../../core/services/provider_health_service.dart';
 import '../../../../core/utils/app_utils.dart';
 import '../../../../core/utils/stream_quality_sorter.dart';
-import '../../domain/stream_resolver.dart';
-import '../../../settings/presentation/player_settings_provider.dart';
+import '../../../../l10n/generated/app_localizations.dart';
 import '../../../details/presentation/details_controller.dart';
+import '../../../settings/presentation/player_settings_provider.dart';
+import '../../domain/episode_navigator.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
-import '../../domain/episode_navigator.dart';
+import '../../domain/side_car_subtitles.dart';
+import '../../domain/stream_resolver.dart';
+import '../../domain/subtitle_search_target.dart';
+import '../player_platform_service.dart';
+import '../subtitle_search_provider.dart' show subtitleLanguageProvider;
 import '../vlc/next_episode_countdown.dart';
+import '../vlc/panel/player_panel_metrics.dart';
+import '../vlc/panel/player_panel_row.dart';
+import '../vlc/panel/player_subtitle_search_page.dart';
 import '../vlc/player_startup_view.dart';
+import '../vlc/side_car_fetch.dart';
+import '../vlc/side_car_subtitle_view.dart';
+import '../widgets/hotstar_player_style.dart';
+import '../widgets/player_control_components.dart';
+import '../widgets/player_sheet_header.dart';
 import '../widgets/player_stream_widgets.dart';
+import 'mediakit_more_sheet.dart';
+import 'mediakit_subtitle_sheet.dart';
+import 'mpv_subtitle_playback.dart';
 
 /// High-Performance Desktop Player Engine powered by `media_kit` (libmpv).
 ///
@@ -82,6 +100,34 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   bool _attemptReachedPicture = false;
   String _attemptProviderId = '';
 
+  /// The subtitle files of what is playing - the source's and any the viewer
+  /// added - which SkyStream draws over the picture rather than handing to
+  /// mpv. See [SideCarSubtitles].
+  late final SideCarSubtitles _sideCars;
+
+  /// The clock the overlaid files are timed off: media_kit's position and
+  /// playing state, plus the delay set in the subtitles sheet.
+  late final MpvSubtitlePlayback _subtitlePlayback = MpvSubtitlePlayback(
+    _player,
+  );
+
+  /// The tracks inside the video, mirrored for the sheet. media_kit owns both
+  /// the list and the selection; these only echo what it last said.
+  final ValueNotifier<List<SubtitleTrack>> _embeddedSubtitles =
+      ValueNotifier(const <SubtitleTrack>[]);
+  final ValueNotifier<String?> _activeEmbeddedSubtitle = ValueNotifier(null);
+
+  /// Set while media is opened with the Subtitles setting at Off: mpv selects
+  /// a subtitle for itself as the file opens, and one selected behind a viewer
+  /// who asked for none is turned off again - see [_applySubtitleDefault].
+  bool _subtitlesOffPending = false;
+  String? _subtitleOffAsked;
+
+  /// Whether the viewer has opened the subtitles sheet on this episode, which
+  /// is where every subtitle choice is made. The Off default and Auto never
+  /// override one.
+  bool _viewerChoseSubtitle = false;
+
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _buffer = Duration.zero;
@@ -91,6 +137,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   double _playbackSpeed = 1.0;
   bool _isFullscreen = false;
   BoxFit _fit = BoxFit.contain;
+
+  /// How this device is driven, derived per build from the device profile -
+  /// a television is handed the ten-foot ramp and a wrapped action row, and
+  /// everything else the two-line bar a pointer can drag. [unknown] until the
+  /// profile resolves, which reads as "not a television": the smaller chrome
+  /// is the one that looks right on every form factor that has not been
+  /// narrowed yet.
+  PlayerFormFactor _form = PlayerFormFactor.unknown;
+
+  bool get _isTv => _form == PlayerFormFactor.tv;
 
   PlaybackProgressRecorder? _recorder;
   PlaybackTracker? _tracker;
@@ -146,6 +202,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         enableHardwareAcceleration: true,
       ),
     );
+
+    _sideCars = SideCarSubtitles(
+      fetch: (url, headers) => ref.read(sideCarFetchProvider)(url, headers),
+      onUnreadable: _handSideCarToEngine,
+    );
+    _sideCars.addListener(_onSideCars);
 
     _mpvConfig = _applyMpvOptimizations();
     _listenPlayerStreams();
@@ -281,6 +343,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _attemptProviderId = '';
     _trackSettlingUntil = null;
     _openToken++;
+    // A file the viewer added belonged to the last episode as much as the
+    // source's did, and the next episode's sheet starts unopened.
+    _sideCars.clear();
+    _viewerChoseSubtitle = false;
 
     setState(() {
       _currentEpisode = next;
@@ -312,6 +378,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         // whole screen for a number nobody can see is the most expensive thing
         // an idle video does.
         _position = pos;
+        _subtitlePlayback.tick();
         _maybeRecordProgress(pos);
 
         // First movement of the clock is the source's successful start. The
@@ -366,6 +433,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _subscriptions.add(
       _player.stream.playing.listen((isPlaying) {
         if (_disposed || !mounted) return;
+        _subtitlePlayback.tick();
         setState(() {
           _playing = isPlaying;
           if (isPlaying) {
@@ -375,6 +443,30 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
             _hasPlayedOnce = true;
           }
         });
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.tracks.listen((tracks) {
+        if (_disposed) return;
+        // mpv's own choices - `no` and `auto` - are not tracks a viewer can
+        // pick; the sheet offers Off itself.
+        _embeddedSubtitles.value = [
+          for (final track in tracks.subtitle)
+            if (track.id != 'no' && track.id != 'auto') track,
+        ];
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.track.listen((track) {
+        if (_disposed) return;
+        final subtitle = track.subtitle;
+        _activeEmbeddedSubtitle.value = subtitle.id == 'no' ||
+                subtitle.id == 'auto'
+            ? null
+            : subtitle.id;
+        _applySubtitleDefault(subtitle.id);
       }),
     );
 
@@ -550,7 +642,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         // The first few mirrors are speed-raced, including a tapped one: an
         // answer opens as picked, and only a source that leaves the screen
         // waiting gives its place to a quicker mirror of the same quality.
-        probeCandidates: kSpeedProbeCandidates,
+        //
+        // That check is a handful of range requests nobody asked for, so it is
+        // skipped on a metered link: the preferred source opens as it stands,
+        // and failover still covers one that turns out dead.
+        probeCandidates: await isOnMeteredNetwork() ? 1 : kSpeedProbeCandidates,
         probeBudget: kSpeedProbeBudget,
         isCancelled: () => _disposed,
         onCandidates: (streams) {
@@ -656,6 +752,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       stream,
       fallback: _item.provider ?? '',
     );
+    _loadSourceSubtitles(stream, headers, at ?? Duration.zero);
 
     try {
       if (_player.platform is NativePlayer) {
@@ -830,78 +927,189 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
   }
 
-  void _toggleFit() {
-    _onUserActivity();
-    setState(() {
-      if (_fit == BoxFit.contain) {
-        _fit = BoxFit.cover;
-      } else if (_fit == BoxFit.cover) {
-        _fit = BoxFit.fill;
-      } else {
-        _fit = BoxFit.contain;
-      }
-    });
+  /// Replaces the picture's fit - chosen in the More sheet, since it changes
+  /// the shape of the picture rather than the playback.
+  void _setFit(BoxFit fit) {
+    if (fit == _fit) return;
+    setState(() => _fit = fit);
   }
 
+
+  /// Replaces the source's subtitle files for the media that has just been
+  /// opened, and puts one on under Auto: the file the viewer was reading
+  /// before a reopen, else the source's file in their language.
+  ///
+  /// Called per attempt, as libVLC's player does, because a failover, a
+  /// recovery and a step-down are new media with their own files.
+  void _loadSourceSubtitles(
+    StreamResult stream,
+    Map<String, String> headers,
+    Duration startAt,
+  ) {
+    final previous = _sideCars.active;
+    final tracks = _sideCars.replaceSourceTracks([
+      for (final sub in stream.subtitles ?? const <SubtitleFile>[])
+        if (_playableSubtitleUri(sub.url) case final url?)
+          (
+            url: url,
+            label: sub.label,
+            language: sub.lang,
+            // A source's subtitles usually sit behind the same checks as its
+            // video; a local file has no use for them.
+            headers: url.scheme.startsWith('http') ? headers : null,
+          ),
+    ]);
+
+    final carried = previous?.origin == SideCarOrigin.source
+        ? matchSideCar(tracks, previous!)
+        : null;
+    if (carried != null) {
+      _subtitlesOffPending = false;
+      unawaited(_sideCars.select(carried, from: startAt));
+      return;
+    }
+
+    _viewerChoseSubtitle = false;
+    _subtitleOffAsked = null;
+    final settings =
+        ref.read(playerSettingsProvider).asData?.value ??
+        const PlayerSettings();
+    _subtitlesOffPending = settings.subtitleDefault == SubtitleDefault.off;
+    if (_subtitlesOffPending || _sideCars.active != null) return;
+
+    final preferred = preferredSubtitleIndex(
+      [for (final track in tracks) track.languageCode],
+      ref.read(subtitleLanguageProvider),
+    );
+    if (preferred != null) {
+      unawaited(_sideCars.select(tracks[preferred], from: startAt));
+    }
+  }
+
+  /// Turns off a subtitle mpv selected for itself while one of SkyStream's own
+  /// files is on - two on screen at once is never what anyone chose - or while
+  /// the setting says Off.
+  ///
+  /// A standing rule rather than a single call, because mpv can select a
+  /// subtitle at the open, when its streams arrive, and again after a seek.
+  /// The Off half stands down for the rest of the media the moment the
+  /// subtitles sheet is opened.
+  void _applySubtitleDefault(String activeId) {
+    if (_sideCars.active != null) {
+      if (activeId == 'no') {
+        _subtitleOffAsked = null;
+        return;
+      }
+      if (activeId == _subtitleOffAsked) return;
+      _subtitleOffAsked = activeId;
+      unawaited(_player.setSubtitleTrack(SubtitleTrack.no()));
+      return;
+    }
+    if (_viewerChoseSubtitle || !_subtitlesOffPending) return;
+    if (activeId == 'no') {
+      // Nothing is selected, so the last request landed.
+      _subtitleOffAsked = null;
+      return;
+    }
+    if (activeId == _subtitleOffAsked) return;
+    _subtitleOffAsked = activeId;
+    unawaited(_player.setSubtitleTrack(SubtitleTrack.no()));
+  }
+
+  /// A file went on: mpv's own subtitle goes off now, so only one is on
+  /// screen.
+  void _onSideCars() {
+    if (_disposed) return;
+    if (_sideCars.active == null) return;
+    if (_player.state.track.subtitle.id == 'no') return;
+    unawaited(_player.setSubtitleTrack(SubtitleTrack.no()));
+  }
+
+  /// A file arrived in a format SkyStream does not read. mpv can be handed
+  /// files a different way, but not from here, so the viewer is told rather
+  /// than left wondering why the row disappeared.
+  void _handSideCarToEngine(SideCarTrack track) {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    if (l10n == null) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(l10n.failedToLoadSubtitles)));
+  }
+
+  Uri? _playableSubtitleUri(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null) return null;
+    if (uri.scheme == 'file') return uri;
+    return uri.scheme.startsWith('http') ? uri : null;
+  }
+
+  /// The tracks inside the video, in the panel's rows so a remote can reach
+  /// them. mpv's own `no` and `auto` entries are not tracks a viewer picks.
   Future<void> _showAudioTrackDialog() async {
     _onUserActivity();
-    final audioTracks = _player.state.tracks.audio;
+    final l10n = AppLocalizations.of(context);
+    final audioTracks = [
+      for (final track in _player.state.tracks.audio)
+        if (track.id != 'no' && track.id != 'auto') track,
+    ];
     final current = _player.state.track.audio;
-    showModalBottomSheet<void>(
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      backgroundColor: HotstarPlayerStyle.panelElevated,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Audio Tracks',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+      builder: (sheetContext) {
+        return PlayerPanelMetricsScope(
+          metrics: PlayerPanelMetrics.forTv(_isTv),
+          child: SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
               ),
-              if (audioTracks.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('Default Audio', style: TextStyle(color: Colors.white70)),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: audioTracks.length,
-                    itemBuilder: (context, i) {
-                      final t = audioTracks[i];
-                      final isSelected = t.id == current.id;
-                      final label = t.title ?? t.language ?? 'Audio Track ${i + 1}';
-                      return ListTile(
-                        leading: Icon(
-                          isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
-                          color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
-                        ),
-                        title: Text(label, style: const TextStyle(color: Colors.white)),
-                        onTap: () {
-                          Navigator.pop(context);
-                          if (!isSelected) {
-                            _holdThroughTrackChange();
-                            _player.setAudioTrack(t);
-                          }
-                        },
-                      );
-                    },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  PlayerSheetHeader(
+                    title: l10n?.audioTracks ?? 'Audio',
+                    isTv: _isTv,
                   ),
-                ),
-            ],
+                  // One audio track is the norm, and the engine reports it -
+                  // there is simply nothing to choose between.
+                  if (audioTracks.isEmpty)
+                    const PanelEmpty(text: 'Default Audio')
+                  else
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.only(bottom: 12),
+                        children: [
+                          for (final (index, track) in audioTracks.indexed)
+                            PanelRow(
+                              label:
+                                  track.title ??
+                                  track.language ??
+                                  l10n?.playerTrackNumber(index + 1) ??
+                                  'Track ${index + 1}',
+                              selected: track.id == current.id,
+                              autofocus: track.id == current.id,
+                              onTap: () {
+                                Navigator.of(sheetContext).maybePop();
+                                if (track.id != current.id) {
+                                  _holdThroughTrackChange();
+                                  unawaited(_player.setAudioTrack(track));
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -910,79 +1118,114 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
   Future<void> _showSubtitleTrackDialog() async {
     _onUserActivity();
-    final subTracks = _player.state.tracks.subtitle;
-    final current = _player.state.track.subtitle;
-    showModalBottomSheet<void>(
+    // Every subtitle choice is made here, so from now on neither the Off
+    // default nor Auto touches the track.
+    _viewerChoseSubtitle = true;
+    _subtitlesOffPending = false;
+    _subtitleOffAsked = null;
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      backgroundColor: HotstarPlayerStyle.panelElevated,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Subtitles',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+      builder: (context) => MediaKitSubtitleSheet(
+        sideCars: _sideCars,
+        delay: _subtitlePlayback.delayListenable,
+        embeddedTracks: _embeddedSubtitles,
+        activeEmbeddedId: _activeEmbeddedSubtitle,
+        isTv: _isTv,
+        onOff: _turnSubtitlesOff,
+        onEmbedded: _selectEmbeddedSubtitle,
+        onSideCar: (file) =>
+            unawaited(_sideCars.select(file, from: _position)),
+        onDelay: _setSubtitleDelay,
+        onLoadFile: () => unawaited(_loadSubtitleFile()),
+        onSearch: () => unawaited(_openSubtitleSearch()),
+      ),
+    );
+  }
+
+  void _turnSubtitlesOff() {
+    unawaited(_sideCars.select(null));
+    unawaited(_player.setSubtitleTrack(SubtitleTrack.no()));
+  }
+
+  void _selectEmbeddedSubtitle(SubtitleTrack track) {
+    unawaited(_sideCars.select(null));
+    unawaited(_player.setSubtitleTrack(track));
+  }
+
+  /// Moves the lines against the picture, for both SkyStream's files and the
+  /// tracks mpv draws.
+  void _setSubtitleDelay(Duration delay) {
+    _subtitlePlayback.setDelay(delay);
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      unawaited(
+        platform.setProperty(
+          'sub-delay',
+          (delay.inMilliseconds / 1000).toStringAsFixed(3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadSubtitleFile() async {
+    final picked = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const <String>['srt', 'vtt', 'ass', 'ssa', 'sub'],
+    );
+    final path = picked?.path;
+    if (path == null) return;
+    await _useSubtitleFile(Uri.file(path), label: picked?.name);
+  }
+
+  /// Lists a file the viewer brought and puts it on, filling in as it is read.
+  Future<bool> _useSubtitleFile(
+    Uri file, {
+    String? label,
+    String? language,
+  }) {
+    final track = _sideCars.addViewerTrack(
+      file,
+      label: label,
+      language: language,
+    );
+    return _sideCars.select(track, from: _position);
+  }
+
+  /// The online search, on the same page the libVLC player opens.
+  Future<void> _openSubtitleSearch() async {
+    _viewerChoseSubtitle = true;
+    final target = SubtitleSearchTarget.of(_item, _effectiveCurrentEpisode);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (context) {
+          final l10n = AppLocalizations.of(context)!;
+          return Scaffold(
+            backgroundColor: const Color(0xFF141414),
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              title: Text(l10n.searchSubtitlesOnline),
+            ),
+            body: SafeArea(
+              child: SubtitleSearchPage(
+                target: target,
+                onFile: (file, subtitle) => _useSubtitleFile(
+                  file,
+                  label: subtitle.name.isEmpty ? null : subtitle.name,
+                  language: subtitle.language,
                 ),
+                onDone: () => Navigator.of(context).maybePop(),
               ),
-              ListTile(
-                leading: Icon(
-                  current.id == 'no' || current.id == null
-                      ? Icons.check_circle_rounded
-                      : Icons.radio_button_unchecked,
-                  color: current.id == 'no' || current.id == null
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.white38,
-                ),
-                title: const Text('Off', style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  if (current.id != 'no' && current.id != null) {
-                    _holdThroughTrackChange();
-                    _player.setSubtitleTrack(SubtitleTrack.no());
-                  }
-                },
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: subTracks.length,
-                  itemBuilder: (context, i) {
-                    final t = subTracks[i];
-                    if (t.id == 'no') return const SizedBox.shrink();
-                    final isSelected = t.id == current.id;
-                    final label = t.title ?? t.language ?? 'Subtitle ${i + 1}';
-                    return ListTile(
-                      leading: Icon(
-                        isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
-                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
-                      ),
-                      title: Text(label, style: const TextStyle(color: Colors.white)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (!isSelected) {
-                          _holdThroughTrackChange();
-                          _player.setSubtitleTrack(t);
-                        }
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -1001,108 +1244,74 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     await _openCandidate(index, startAt: _position);
   }
 
+  /// The source picker, opened from the More sheet: one row per stream in the
+  /// order the resolver ranked them, the one playing ticked.
+  ///
+  /// The panel's row rather than a list tile, so a remote can reach every
+  /// source with the arrows and Select.
   void _showSourcesDialog() {
     _onUserActivity();
+    final l10n = AppLocalizations.of(context);
     final streams = _resolved?.streams ?? _candidates;
-    if (streams.isEmpty) return;
     final playingIndex = _attemptIndex;
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      backgroundColor: HotstarPlayerStyle.panelElevated,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text(
-                  'Quality & Sources',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+      builder: (sheetContext) {
+        return PlayerPanelMetricsScope(
+          metrics: PlayerPanelMetrics.forTv(_isTv),
+          child: SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  PlayerSheetHeader(
+                    title: l10n?.sources ?? 'Sources',
+                    isTv: _isTv,
                   ),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  'Switching keeps your place in the episode.',
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: streams.length,
-                  itemBuilder: (context, i) {
-                    final s = streams[i];
-                    final isSelected = i == playingIndex;
-                    final quality = qualityBadgeLabel(s);
-                    return ListTile(
-                      leading: Icon(
-                        isSelected ? Icons.play_arrow_rounded : Icons.stream_rounded,
-                        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white38,
-                      ),
-                      title: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.18)
-                                  : Colors.white10,
-                              borderRadius: BorderRadius.circular(5),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 12),
+                      children: [
+                        // The press is on the bar whatever the list holds, so
+                        // it always opens something - a sheet that says there
+                        // is nothing is an answer; a press that does nothing
+                        // reads as a bug.
+                        if (streams.isEmpty)
+                          PanelEmpty(
+                            text:
+                                'No other sources were found for this title.',
+                          )
+                        else
+                          for (final (index, stream) in streams.indexed)
+                            PanelRow(
+                              label: stream.displaySource,
+                              badges: <String>[qualityBadgeLabel(stream)],
+                              selected: index == playingIndex,
+                              selectedLabel: 'Now playing',
+                              autofocus: index == playingIndex,
+                              onTap: () {
+                                Navigator.of(sheetContext).maybePop();
+                                if (index != playingIndex) {
+                                  unawaited(_switchSource(index));
+                                }
+                              },
                             ),
-                            child: Text(
-                              quality,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.white70,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              s.displaySource,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: isSelected
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.white,
-                                fontWeight:
-                                    isSelected ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      subtitle: isSelected
-                          ? const Text(
-                              'Now playing',
-                              style: TextStyle(color: Colors.white54, fontSize: 11),
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (!isSelected) _switchSource(i);
-                      },
-                    );
-                  },
-                ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         );
       },
@@ -1162,6 +1371,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _recordFinalProgress();
     _tracker?.finish();
     _cleanupPlatformOnExit();
+    _sideCars.removeListener(_onSideCars);
+    _sideCars.dispose();
+    _subtitlePlayback.dispose();
+    _embeddedSubtitles.dispose();
+    _activeEmbeddedSubtitle.dispose();
     _player.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -1198,6 +1412,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     final playerSettings = ref.watch(playerSettingsProvider).asData?.value;
     final stremioTheme = playerSettings?.stremioLoadScreen ?? true;
     final seamlessMode = playerSettings?.seamlessPlayback ?? true;
+    // Watched, so a profile that resolves after the first frame - the usual
+    // case on a television - re-lays the chrome out at ten-foot size.
+    _form = playerFormFactorOf(
+      ref.watch(deviceProfileProvider).asData?.value,
+    );
 
     return PopScope(
       canPop: true,
@@ -1235,6 +1454,31 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       controller: _videoController,
                       fit: _fit,
                       controls: NoVideoControls,
+                    ),
+                  ),
+
+                  // The source's and the viewer's subtitle files, drawn over
+                  // the picture so Zoom and Stretch never touch them - the
+                  // same renderer libVLC's player uses.
+                  Positioned.fill(
+                    child: Consumer(
+                      builder: (context, ref, _) {
+                        final settings =
+                            ref.watch(playerSettingsProvider).asData?.value ??
+                            const PlayerSettings();
+                        return SideCarSubtitleView(
+                          playback: _subtitlePlayback,
+                          subtitles: _sideCars,
+                          settings: settings,
+                          // Lifted over the bar while it is up, by the same
+                          // clearance every other overlay in the player uses.
+                          bottomInset: _controlsVisible
+                              ? HotstarPlayerStyle.bottomChromeHeightFor(
+                                  isTv: _isTv,
+                                )
+                              : 0,
+                        );
+                      },
                     ),
                   ),
 
@@ -1357,64 +1601,19 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                       ),
                     ),
 
-                  // Center Quick Action Transport Controls (Touch & Remote)
-                  if (_controlsVisible && !_isLoading && _error.isEmpty)
+                  // A paused frame offers the one press it is waiting for, in
+                  // the middle of the picture. While the film runs the bar's
+                  // transport is enough - a cluster over the picture is chrome
+                  // on a face, and it was the same four buttons twice.
+                  if (!_playing &&
+                      !_isBuffering &&
+                      !_isLoading &&
+                      _error.isEmpty)
                     Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black45,
-                          borderRadius: BorderRadius.circular(40),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_hasPreviousEpisode)
-                              IconButton(
-                                iconSize: 36,
-                                tooltip: 'Previous Episode',
-                                icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
-                                onPressed: () {
-                                  _onUserActivity();
-                                  final prev = _previousEpisode;
-                                  if (prev != null) _startEpisode(prev);
-                                },
-                              ),
-                            IconButton(
-                              iconSize: 36,
-                              tooltip: 'Rewind 10s',
-                              icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
-                              onPressed: () => _seekRelative(-10),
-                            ),
-                            const SizedBox(width: 16),
-                            IconButton(
-                              iconSize: 56,
-                              tooltip: _playing ? 'Pause' : 'Play',
-                              icon: Icon(
-                                _playing ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                                color: Colors.white,
-                              ),
-                              onPressed: _togglePlayPause,
-                            ),
-                            const SizedBox(width: 16),
-                            IconButton(
-                              iconSize: 36,
-                              tooltip: 'Forward 10s',
-                              icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
-                              onPressed: () => _seekRelative(10),
-                            ),
-                            if (_hasNextEpisode)
-                              IconButton(
-                                iconSize: 36,
-                                tooltip: 'Next Episode',
-                                icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
-                                onPressed: () {
-                                  _onUserActivity();
-                                  _advance();
-                                },
-                              ),
-                          ],
-                        ),
+                      child: PlayerCenterPlayButton(
+                        playing: false,
+                        label: AppLocalizations.of(context)?.play ?? 'Play',
+                        onPressed: _togglePlayPause,
                       ),
                     ),
 
@@ -1442,288 +1641,233 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
   }
 
+  /// The top zone: Back, what is playing, and the one press worth having while
+  /// an episode is queued.
+  ///
+  /// No engine badge. What decodes the picture is a fact about this device,
+  /// not a control, and it sat where a viewer looks for a title.
   Widget _buildTopBar() {
+    final l10n = AppLocalizations.of(context);
     final ep = _effectiveCurrentEpisode;
+    final next = _nextEpisode;
     final String? epText = ep != null
         ? (ep.name.isNotEmpty
-            ? (ep.season > 0 ? 'S${ep.season} E${ep.episode} — ${ep.name}' : 'Episode ${ep.episode} — ${ep.name}')
-            : (ep.season > 0 ? 'Season ${ep.season} Episode ${ep.episode}' : 'Episode ${ep.episode}'))
+              ? (ep.season > 0
+                    ? 'S${ep.season} E${ep.episode} — ${ep.name}'
+                    : 'Episode ${ep.episode} — ${ep.name}')
+              : (ep.season > 0
+                    ? 'Season ${ep.season} Episode ${ep.episode}'
+                    : 'Episode ${ep.episode}'))
         : null;
 
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.black.withValues(alpha: 0.8),
-              Colors.transparent,
-            ],
-          ),
-        ),
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 28),
-              onPressed: _exitPlayer,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _item.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (epText != null)
-                    Text(
-                      epText,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-            if (_hasNextEpisode)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white24,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    minimumSize: const Size(0, 34),
-                  ),
-                  icon: const Icon(Icons.skip_next_rounded, size: 18),
-                  label: Text(
-                    _nextEpisode != null && _nextEpisode!.episode > 0
-                        ? 'Next (E${_nextEpisode!.episode})'
-                        : 'Next',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () {
+      child: PlayerTopBar(
+        title: _item.title,
+        subtitle: epText,
+        onBack: _exitPlayer,
+        isTv: _isTv,
+        trailing: next == null
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: PlayerActionButton(
+                  icon: Icons.skip_next_rounded,
+                  label: next.episode > 0
+                      ? '${l10n?.next ?? 'Next'} E${next.episode}'
+                      : (l10n?.next ?? 'Next'),
+                  isTv: _isTv,
+                  onTap: () {
                     _onUserActivity();
-                    _advance();
+                    unawaited(_advance());
                   },
                 ),
               ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white12,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                Platform.isAndroid ? 'MediaCodec GPU' : 'Direct3D 11 GPU',
-                style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
 
+  /// The bottom zone: scrubber, transport, clock, then the three controls a
+  /// viewer reaches for while watching. Everything else is one press away in
+  /// [MediaKitMoreSheet].
   Widget _buildBottomBar() {
-    final displayPos = _isDragging && _dragPosition != null ? _dragPosition! : _position;
-    final posText = _formatDuration(displayPos);
-    final durText = _formatDuration(_duration);
-
+    final l10n = AppLocalizations.of(context);
+    final displayPos = _isDragging && _dragPosition != null
+        ? _dragPosition!
+        : _position;
+    // A feed's clock has no end to count towards, so the label reads LIVE
+    // instead of `00:12:04 / --:--` - the same rule, and the same helper, as
+    // libVLC's bar.
+    final live = isLiveSource(_item, _currentVideoUrl);
     return Positioned(
       bottom: 0,
       left: 0,
       right: 0,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              Colors.black.withValues(alpha: 0.85),
-              Colors.transparent,
-            ],
+      child: PlayerBottomBar(
+        isTv: _isTv,
+        // Everything but a television can drag the strip, so everything but a
+        // television gets one line.
+        scrollingActions: !_isTv,
+        // Its own boundary: the scrubber repaints on every position tick,
+        // which would otherwise repaint the bar, its scrim and every button.
+        progressBar: RepaintBoundary(
+          child: PlayerScrubber(
+            position: displayPos,
+            duration: _duration,
+            hasDuration: _duration > Duration.zero,
+            bufferRatio: _bufferRatio,
+            canSeek: !live && _duration > Duration.zero,
+            isTv: _isTv,
+            onChangeStart: (ms) {
+              _onUserActivity();
+              setState(() {
+                _isDragging = true;
+                _dragPosition = Duration(milliseconds: ms.round());
+              });
+            },
+            onChanged: (ms) {
+              _onUserActivity();
+              setState(() {
+                _dragPosition = Duration(milliseconds: ms.round());
+              });
+            },
+            onChangeEnd: (ms) {
+              _onUserActivity();
+              final target = Duration(milliseconds: ms.round());
+              setState(() {
+                _isDragging = false;
+                _dragPosition = null;
+              });
+              _player.seek(target);
+            },
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Seek bar with real-time buffer progress line
-            PlayerScrubber(
-              position: displayPos,
-              duration: _duration,
-              hasDuration: _duration > Duration.zero,
-              bufferRatio: _bufferRatio,
-              canSeek: _duration > Duration.zero,
-              onChangeStart: (ms) {
+        leading: [
+          PlayerIconButton(
+            icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            tooltip: _playing ? (l10n?.pause ?? 'Pause') : (l10n?.play ?? 'Play'),
+            isTv: _isTv,
+            iconSize: _isTv ? 34 : 30,
+            // A remote starts on the press it makes most often.
+            autofocus: _isTv,
+            onPressed: _togglePlayPause,
+          ),
+          if (_hasPreviousEpisode)
+            PlayerIconButton(
+              icon: Icons.skip_previous_rounded,
+              tooltip: l10n?.previous ?? 'Previous',
+              isTv: _isTv,
+              onPressed: () {
                 _onUserActivity();
-                setState(() {
-                  _isDragging = true;
-                  _dragPosition = Duration(milliseconds: ms.round());
-                });
-              },
-              onChanged: (ms) {
-                _onUserActivity();
-                setState(() {
-                  _dragPosition = Duration(milliseconds: ms.round());
-                });
-              },
-              onChangeEnd: (ms) {
-                _onUserActivity();
-                final target = Duration(milliseconds: ms.round());
-                setState(() {
-                  _isDragging = false;
-                  _dragPosition = null;
-                });
-                _player.seek(target);
+                final prev = _previousEpisode;
+                if (prev != null) unawaited(_startEpisode(prev));
               },
             ),
-            const SizedBox(height: 4),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-                    onPressed: _togglePlayPause,
-                  ),
-                  if (_hasPreviousEpisode)
-                    IconButton(
-                      tooltip: 'Previous Episode',
-                      icon: const Icon(Icons.skip_previous_rounded, color: Colors.white70, size: 28),
-                      onPressed: () {
-                        _onUserActivity();
-                        final prev = _previousEpisode;
-                        if (prev != null) _startEpisode(prev);
-                      },
-                    ),
-                  if (_hasNextEpisode)
-                    IconButton(
-                      tooltip: 'Next Episode',
-                      icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 28),
-                      onPressed: () {
-                        _onUserActivity();
-                        _advance();
-                      },
-                    ),
-                  IconButton(
-                    icon: const Icon(Icons.replay_10_rounded, color: Colors.white70, size: 26),
-                    onPressed: () => _seekRelative(-10),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.forward_10_rounded, color: Colors.white70, size: 26),
-                    onPressed: () => _seekRelative(10),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '$posText / $durText',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                  const SizedBox(width: 16),
-                  if (_candidates.length > 1)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: TextButton.icon(
-                        onPressed: _showSourcesDialog,
-                        icon: const Icon(
-                          Icons.layers_rounded,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                        label: Text(
-                          _currentQualityLabel,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white10,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 4,
-                          ),
-                          minimumSize: const Size(0, 32),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                    ),
-                  IconButton(
-                    tooltip: 'Audio Tracks',
-                    icon: const Icon(Icons.audiotrack_rounded, color: Colors.white, size: 24),
-                    onPressed: _showAudioTrackDialog,
-                  ),
-                  IconButton(
-                    tooltip: 'Subtitles',
-                    icon: const Icon(Icons.subtitles_rounded, color: Colors.white, size: 24),
-                    onPressed: _showSubtitleTrackDialog,
-                  ),
-                  IconButton(
-                    tooltip: 'Fit Mode',
-                    icon: const Icon(Icons.aspect_ratio_rounded, color: Colors.white, size: 24),
-                    onPressed: _toggleFit,
-                  ),
-                  TextButton(
-                    child: Text(
-                      '${_playbackSpeed}x',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: () {
-                      _onUserActivity();
-                      final speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
-                      final idx = speeds.indexOf(_playbackSpeed);
-                      final next = speeds[(idx + 1) % speeds.length];
-                      setState(() => _playbackSpeed = next);
-                      _player.setRate(next);
-                    },
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                      color: Colors.white,
-                      size: 28,
-                    ),
-                    onPressed: _toggleFullscreen,
-                  ),
-                ],
+          if (_hasNextEpisode)
+            PlayerIconButton(
+              icon: Icons.skip_next_rounded,
+              tooltip: l10n?.next ?? 'Next',
+              isTv: _isTv,
+              onPressed: () {
+                _onUserActivity();
+                unawaited(_advance());
+              },
+            ),
+          // Nothing to step through on a feed: there is no recorded past to
+          // skip back into and no future to skip ahead to.
+          if (!live)
+            PlayerIconButton(
+              icon: Icons.replay_10_rounded,
+              tooltip: 'Rewind 10s',
+              isTv: _isTv,
+              onPressed: () => _seekRelative(-10),
+            ),
+          if (!live)
+            PlayerIconButton(
+              icon: Icons.forward_10_rounded,
+              tooltip: 'Forward 10s',
+              isTv: _isTv,
+              onPressed: () => _seekRelative(10),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 4),
+            child: RepaintBoundary(
+              child: PlayerTimeLabel(
+                position: displayPos,
+                duration: _duration,
+                hasDuration: _duration > Duration.zero,
+                isLive: live,
               ),
             ),
-          ],
-        ),
+          ),
+        ],
+        actions: [
+          PlayerIconButton(
+            icon: Icons.audiotrack_rounded,
+            tooltip: l10n?.audioTracks ?? 'Audio',
+            isTv: _isTv,
+            onPressed: _showAudioTrackDialog,
+          ),
+          ListenableBuilder(
+            listenable: Listenable.merge([
+              _sideCars,
+              _activeEmbeddedSubtitle,
+            ]),
+            builder: (context, _) => PlayerIconButton(
+              icon: Icons.subtitles_rounded,
+              tooltip: l10n?.subtitles ?? 'Subtitles',
+              isTv: _isTv,
+              highlight:
+                  _sideCars.active != null ||
+                  _activeEmbeddedSubtitle.value != null,
+              onPressed: _showSubtitleTrackDialog,
+            ),
+          ),
+          PlayerIconButton(
+            icon: Icons.tune_rounded,
+            tooltip: 'More',
+            isTv: _isTv,
+            onPressed: _showMoreSheet,
+          ),
+        ],
       ),
     );
   }
 
-  String _formatDuration(Duration d) {
-    final hours = d.inHours;
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    if (hours > 0) {
-      return '$hours:$minutes:$seconds';
-    }
-    return '$minutes:$seconds';
+  /// Speed, fit, fullscreen and the source picker: the controls that change
+  /// how the film is played rather than what is playing.
+  Future<void> _showMoreSheet() async {
+    _onUserActivity();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: HotstarPlayerStyle.panelElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => MediaKitMoreSheet(
+        speed: _playbackSpeed,
+        fit: _fit,
+        isFullscreen: _isFullscreen,
+        quality: _currentQualityLabel,
+        isTv: _isTv,
+        isLive: isLiveSource(_item, _currentVideoUrl),
+        onSpeed: _setPlaybackSpeed,
+        onFit: _setFit,
+        onFullscreen: _toggleFullscreen,
+        onSources: () {
+          Navigator.of(sheetContext).maybePop();
+          _showSourcesDialog();
+        },
+      ),
+    );
+  }
+
+  void _setPlaybackSpeed(double speed) {
+    if (speed == _playbackSpeed) return;
+    setState(() => _playbackSpeed = speed);
+    unawaited(_player.setRate(speed));
   }
 }

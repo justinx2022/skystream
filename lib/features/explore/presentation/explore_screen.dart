@@ -130,8 +130,7 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen>
             : SystemUiOverlayStyle.dark;
 
         return Scaffold(
-          backgroundColor: Theme.of(context)
-              .scaffoldBackgroundColor, // Base background
+          backgroundColor: Colors.transparent,
           extendBodyBehindAppBar: true,
           appBar: AppBar(
             systemOverlayStyle: overlayStyle,

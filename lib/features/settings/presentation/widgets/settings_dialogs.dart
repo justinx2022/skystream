@@ -14,8 +14,10 @@ import '../../../../core/network/dio_client_provider.dart';
 import '../../../../core/network/doh_service.dart';
 import '../../../../core/storage/settings_repository.dart';
 import '../../../../core/services/download_service.dart';
+import '../../../../core/theme/theme_presets.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/utils/app_utils.dart';
+import '../../../../shared/focus/app_focus.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../player/domain/network_buffer.dart';
 import '../player_settings_provider.dart';
@@ -1315,7 +1317,14 @@ class _DohProviderDialogState extends ConsumerState<_DohProviderDialog> {
   }
 }
 
-/// Shows a dialog to pick the app theme mode.
+/// Shows the appearance picker: light/dark mode first, then the palette the
+/// scheme is generated from, the surface style, and an optional ambient
+/// backdrop.
+///
+/// The mode rows stay [ListTile]s - they are the three answers everyone already
+/// knows - and the three newer choices sit underneath as compact rows of
+/// choices, because a dialog that listed every combination would be a page of
+/// radios nobody finishes.
 void showThemeDialog(
   BuildContext context,
   WidgetRef ref,
@@ -1327,43 +1336,9 @@ void showThemeDialog(
     builder: (context) => AlertDialog(
       surfaceTintColor: Colors.transparent,
       title: Text(l10n.chooseTheme),
-      content: RadioGroup<ThemeMode>(
-        groupValue: currentTheme,
-        onChanged: (val) {
-          if (val == null) return;
-          ref.read(appThemeModeProvider.notifier).setThemeMode(val);
-          Navigator.pop<void>(context);
-        },
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildThemeOption(
-                l10n.system,
-                ThemeMode.system,
-                currentTheme,
-                () {
-                  ref
-                      .read(appThemeModeProvider.notifier)
-                      .setThemeMode(ThemeMode.system);
-                  Navigator.pop<void>(context);
-                },
-              ),
-              _buildThemeOption(l10n.dark, ThemeMode.dark, currentTheme, () {
-                ref
-                    .read(appThemeModeProvider.notifier)
-                    .setThemeMode(ThemeMode.dark);
-                Navigator.pop<void>(context);
-              }),
-              _buildThemeOption(l10n.light, ThemeMode.light, currentTheme, () {
-                ref
-                    .read(appThemeModeProvider.notifier)
-                    .setThemeMode(ThemeMode.light);
-                Navigator.pop<void>(context);
-              }),
-            ],
-          ),
-        ),
+      contentPadding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
+      content: SingleChildScrollView(
+        child: _ThemePickerBody(initialMode: currentTheme),
       ),
       actions: [
         TextButton(
@@ -1379,6 +1354,400 @@ void showThemeDialog(
     ),
   );
 }
+
+/// The dialog's live contents.
+///
+/// Stateful for the mode only: the rows need a selected value that moves the
+/// instant one is tapped, and [RadioGroup] is a controlled widget, so the
+/// answer has to live somewhere it can rebuild. The other three choices read
+/// straight from their provider.
+class _ThemePickerBody extends ConsumerStatefulWidget {
+  const _ThemePickerBody({required this.initialMode});
+
+  final ThemeMode initialMode;
+
+  @override
+  ConsumerState<_ThemePickerBody> createState() => _ThemePickerBodyState();
+}
+
+class _ThemePickerBodyState extends ConsumerState<_ThemePickerBody> {
+  late ThemeMode _mode = widget.initialMode;
+
+  void _selectMode(ThemeMode mode) {
+    setState(() => _mode = mode);
+    ref.read(appThemeModeProvider.notifier).setThemeMode(mode);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final customization = ref.watch(themeCustomizationProvider);
+    final scheme = Theme.of(context).colorScheme;
+    final brightness = Theme.of(context).brightness;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RadioGroup<ThemeMode>(
+          groupValue: _mode,
+          onChanged: (val) {
+            if (val != null) _selectMode(val);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildThemeOption(l10n.system, ThemeMode.system, _mode, () {
+                _selectMode(ThemeMode.system);
+              }),
+              _buildThemeOption(l10n.dark, ThemeMode.dark, _mode, () {
+                _selectMode(ThemeMode.dark);
+              }),
+              _buildThemeOption(l10n.light, ThemeMode.light, _mode, () {
+                _selectMode(ThemeMode.light);
+              }),
+            ],
+          ),
+        ),
+        _AppearanceSection(
+          label: l10n.appearancePalette,
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 8,
+            children: [
+              for (final palette in AppPalette.values)
+                _PaletteSwatch(
+                  palette: palette,
+                  label: appearancePaletteLabel(palette, l10n),
+                  selected: customization.palette == palette,
+                  onTap: () => ref
+                      .read(themeCustomizationProvider.notifier)
+                      .setPalette(palette),
+                ),
+            ],
+          ),
+        ),
+        _AppearanceSection(
+          label: l10n.appearanceSurface,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final style in AppSurfaceStyle.values)
+                _AppearanceChip(
+                  label: appearanceSurfaceLabel(style, l10n),
+                  selected: customization.surface == style,
+                  preview: _surfacePreview(style, brightness, scheme),
+                  onTap: () => ref
+                      .read(themeCustomizationProvider.notifier)
+                      .setSurface(style),
+                ),
+            ],
+          ),
+        ),
+        _AppearanceSection(
+          label: l10n.appearanceBackdrop,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final backdrop in AppBackdrop.values)
+                _AppearanceChip(
+                  label: appearanceBackdropLabel(backdrop, l10n),
+                  selected: customization.backdrop == backdrop,
+                  preview: _backdropPreview(
+                    backdrop,
+                    brightness,
+                    scheme,
+                    customization.surface,
+                  ),
+                  onTap: () => ref
+                      .read(themeCustomizationProvider.notifier)
+                      .setBackdrop(backdrop),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The dot next to a surface name, so "AMOLED" and "Paper" can be told apart
+  /// without trying each one.
+  Widget _surfacePreview(
+    AppSurfaceStyle style,
+    Brightness brightness,
+    ColorScheme scheme,
+  ) {
+    final colors = resolveSurfaceColors(
+      style: style,
+      brightness: brightness,
+      scheme: scheme,
+    );
+    return _PreviewDot(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: colors.scaffold,
+        border: Border.all(
+          color: scheme.onSurface.withValues(alpha: 0.35),
+          width: 1,
+        ),
+      ),
+    );
+  }
+
+  Widget _backdropPreview(
+    AppBackdrop backdrop,
+    Brightness brightness,
+    ColorScheme scheme,
+    AppSurfaceStyle surface,
+  ) {
+    final base = resolveSurfaceColors(
+      style: surface,
+      brightness: brightness,
+      scheme: scheme,
+    ).scaffold;
+    final gradient = backdrop.gradientFor(
+      brightness: brightness,
+      base: base,
+      seed: scheme.primary,
+    );
+    return _PreviewDot(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: gradient == null ? base : null,
+        gradient: gradient,
+        border: Border.all(
+          color: scheme.onSurface.withValues(alpha: 0.35),
+          width: 1,
+        ),
+      ),
+    );
+  }
+}
+
+/// Names for the appearance choices, shared with the settings row so its
+/// subtitle names the same things the picker does.
+String appearancePaletteLabel(AppPalette palette, AppLocalizations l10n) {
+  switch (palette) {
+    case AppPalette.dynamic:
+      return l10n.appearancePaletteDynamic;
+    case AppPalette.blue:
+      return l10n.appearancePaletteBlue;
+    case AppPalette.emerald:
+      return l10n.appearancePaletteEmerald;
+    case AppPalette.coral:
+      return l10n.appearancePaletteCoral;
+    case AppPalette.violet:
+      return l10n.appearancePaletteViolet;
+    case AppPalette.amber:
+      return l10n.appearancePaletteAmber;
+  }
+}
+
+String appearanceSurfaceLabel(AppSurfaceStyle style, AppLocalizations l10n) {
+  switch (style) {
+    case AppSurfaceStyle.automatic:
+      return l10n.appearanceSurfaceAutomatic;
+    case AppSurfaceStyle.amoled:
+      return l10n.appearanceSurfaceAmoled;
+    case AppSurfaceStyle.midnight:
+      return l10n.appearanceSurfaceMidnight;
+    case AppSurfaceStyle.standard:
+      return l10n.appearanceSurfaceStandard;
+    case AppSurfaceStyle.paper:
+      return l10n.appearanceSurfacePaper;
+  }
+}
+
+String appearanceBackdropLabel(AppBackdrop backdrop, AppLocalizations l10n) {
+  switch (backdrop) {
+    case AppBackdrop.none:
+      return l10n.none;
+    case AppBackdrop.aurora:
+      return l10n.appearanceBackdropAurora;
+    case AppBackdrop.dusk:
+      return l10n.appearanceBackdropDusk;
+    case AppBackdrop.ember:
+      return l10n.appearanceBackdropEmber;
+  }
+}
+
+/// One titled row of appearance choices.
+class _AppearanceSection extends StatelessWidget {
+  const _AppearanceSection({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+/// The small colour sample inside an appearance chip.
+class _PreviewDot extends StatelessWidget {
+  const _PreviewDot({required this.decoration});
+
+  final BoxDecoration decoration;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 16,
+      height: 16,
+      decoration: decoration,
+    );
+  }
+}
+
+/// A palette as a tap target: the colour, its name, and a tick when chosen.
+///
+/// The swatch is the control and the name is its label rather than a tooltip,
+/// so the dialog reads at a glance and a screen reader gets the same word.
+class _PaletteSwatch extends StatefulWidget {
+  const _PaletteSwatch({
+    required this.palette,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppPalette palette;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_PaletteSwatch> createState() => _PaletteSwatchState();
+}
+
+class _PaletteSwatchState extends State<_PaletteSwatch> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final seed = widget.palette.seed;
+    final swatch = widget.palette == AppPalette.dynamic
+        ? const BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: SweepGradient(
+              colors: <Color>[
+                Color(0xFF448AFF),
+                Color(0xFF10B981),
+                Color(0xFFF59E0B),
+                Color(0xFFEF4444),
+                Color(0xFF8B5CF6),
+                Color(0xFF448AFF),
+              ],
+            ),
+          )
+        : BoxDecoration(shape: BoxShape.circle, color: seed);
+    final tickColor =
+        seed == null || ThemeData.estimateBrightnessForColor(seed) == Brightness.dark
+        ? Colors.white
+        : Colors.black;
+
+    return Semantics(
+      button: true,
+      selected: widget.selected,
+      label: widget.label,
+      child: Focus(
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: InkResponse(
+          onTap: widget.onTap,
+          radius: 28,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FocusRing(
+                  focused: _focused,
+                  shape: BoxShape.circle,
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: swatch.copyWith(
+                      border: widget.selected
+                          ? Border.all(color: scheme.onSurface, width: 2)
+                          : null,
+                    ),
+                    child: widget.selected
+                        ? Icon(Icons.check_rounded, size: 18, color: tickColor)
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.label,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A named appearance choice with a small preview and a tick when chosen.
+class _AppearanceChip extends StatelessWidget {
+  const _AppearanceChip({
+    required this.label,
+    required this.selected,
+    required this.preview,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Widget preview;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      selected: selected,
+      onSelected: (_) => onTap(),
+      showCheckmark: false,
+      avatar: preview,
+      label: Text(label),
+      labelStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: selected ? scheme.onSecondaryContainer : scheme.onSurface,
+      ),
+      selectedColor: scheme.secondaryContainer,
+      backgroundColor: scheme.surfaceContainerHigh,
+      side: BorderSide(
+        color: selected ? scheme.primary : Colors.transparent,
+        width: 1.5,
+      ),
+    );
+  }
+}
+
+
 
 /// Shows a dialog to reset data.
 void showResetDataDialog(BuildContext context, WidgetRef ref) {

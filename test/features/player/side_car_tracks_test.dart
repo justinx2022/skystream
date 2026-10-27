@@ -545,7 +545,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SideCarSubtitleView(
-              controller: controller,
+              playback: VlcSubtitlePlayback(controller),
               subtitles: subtitles,
               settings: const PlayerSettings(),
               bottomInset: bottomInset,
@@ -594,7 +594,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SideCarSubtitleView(
-              controller: controller,
+              playback: VlcSubtitlePlayback(controller),
               subtitles: subtitles,
               settings: const PlayerSettings(),
               clock: fake,
@@ -632,7 +632,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SideCarSubtitleView(
-              controller: controller,
+              playback: VlcSubtitlePlayback(controller),
               subtitles: subtitles,
               settings: const PlayerSettings(),
               clock: fake,

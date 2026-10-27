@@ -167,6 +167,22 @@ void main() {
     test('falls back to a small file when it is the only subtitle', () {
       expect(pickSubtitleEntry([_file('Short.srt', 400)]), 'Short.srt');
     });
+
+    // The picker takes the largest entry, so without a ceiling the entry it
+    // would choose is exactly the one a decompression bomb ships.
+    test('never takes an entry too large to be a subtitle', () {
+      expect(
+        pickSubtitleEntry([
+          _file('Movie.srt', 70000),
+          _file('Movie.bomb.srt', 64 * 1024 * 1024),
+        ]),
+        'Movie.srt',
+      );
+      expect(
+        pickSubtitleEntry([_file('Movie.bomb.srt', 64 * 1024 * 1024)]),
+        isNull,
+      );
+    });
   });
 
   group('episodeTagOf', () {

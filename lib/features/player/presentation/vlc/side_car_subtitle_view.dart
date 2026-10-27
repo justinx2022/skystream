@@ -13,6 +13,9 @@
 /// run on here at the playback speed, and one timer wakes the view at the next
 /// line's start or end: a line lands on its frame rather than up to half a
 /// second after it, and nothing is rebuilt in between.
+///
+/// Engine-agnostic: everything read to time a line comes through
+/// [SubtitlePlayback], so libVLC and media_kit share this renderer.
 library;
 
 import 'dart:async';
@@ -26,6 +29,7 @@ import 'package:vlc_player/vlc_player.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/side_car_subtitles.dart';
 import '../../domain/subtitle_cues.dart';
+import '../../domain/subtitle_playback.dart';
 import '../../domain/subtitle_style.dart';
 
 /// How far the clock is run on past the engine's last report. Past this the
@@ -45,7 +49,7 @@ const double _kSideMargin = 0.05;
 /// no line is due.
 class SideCarSubtitleView extends StatefulWidget {
   const SideCarSubtitleView({
-    required this.controller,
+    required this.playback,
     required this.subtitles,
     required this.settings,
     this.bottomInset = 0,
@@ -53,7 +57,8 @@ class SideCarSubtitleView extends StatefulWidget {
     super.key,
   });
 
-  final VlcPlayerController controller;
+  /// The engine's clock, its state and the viewer's delay.
+  final SubtitlePlayback playback;
   final SideCarSubtitles subtitles;
   final PlayerSettings settings;
 
@@ -88,7 +93,7 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_onEngine);
+    widget.playback.addListener(_onEngine);
     widget.subtitles.addListener(_refresh);
     _onEngine();
   }
@@ -96,9 +101,9 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
   @override
   void didUpdateWidget(SideCarSubtitleView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_onEngine);
-      widget.controller.addListener(_onEngine);
+    if (oldWidget.playback != widget.playback) {
+      oldWidget.playback.removeListener(_onEngine);
+      widget.playback.addListener(_onEngine);
     }
     if (oldWidget.subtitles != widget.subtitles) {
       oldWidget.subtitles.removeListener(_refresh);
@@ -109,16 +114,16 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_onEngine);
+    widget.playback.removeListener(_onEngine);
     widget.subtitles.removeListener(_refresh);
     _wake?.cancel();
     super.dispose();
   }
 
   void _onEngine() {
-    final value = widget.controller.value;
-    if (value.position != _reported) {
-      _reported = value.position;
+    final position = widget.playback.position;
+    if (position != _reported) {
+      _reported = position;
       _reportedAt = _now;
     }
     _refresh();
@@ -134,16 +139,16 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
     _wake?.cancel();
     _wake = null;
     if (!mounted) return;
-    final value = widget.controller.value;
+    final playback = widget.playback;
     final timeline = widget.subtitles.timeline;
-    final playing = value.isPlaying && value.playbackSpeed > 0;
+    final playing = playback.isPlaying && playback.speed > 0;
     final runOn = playing ? _runOn : Duration.zero;
     // The position the file's times are read against: where playback is,
     // less the delay - a positive delay shows every line later.
     final at =
         _reported +
-        runOn * (playing ? value.playbackSpeed : 1) -
-        value.subtitleDelay;
+        runOn * (playing ? playback.speed : 1) -
+        playback.delay;
     final due = timeline.isEmpty ? const <SubtitleCue>[] : timeline.at(at);
     if (!listEquals(due, _shown)) setState(() => _shown = due);
 
@@ -151,7 +156,7 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
     if (!playing || runOn >= _kMaxRunOn) return;
     final next = timeline.nextChange(at);
     if (next == null) return;
-    final wait = (next - at) * (1 / value.playbackSpeed);
+    final wait = (next - at) * (1 / playback.speed);
     // A millisecond over, so the wake lands inside the new line, not on the
     // edge of the old one.
     _wake = Timer(wait + const Duration(milliseconds: 1), _refresh);
@@ -273,4 +278,30 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
       ),
     );
   }
+}
+
+/// A libVLC controller as the overlay's clock.
+class VlcSubtitlePlayback implements SubtitlePlayback {
+  const VlcSubtitlePlayback(this.controller);
+
+  final VlcPlayerController controller;
+
+  @override
+  Duration get position => controller.value.position;
+
+  @override
+  bool get isPlaying => controller.value.isPlaying;
+
+  @override
+  double get speed => controller.value.playbackSpeed;
+
+  @override
+  Duration get delay => controller.value.subtitleDelay;
+
+  @override
+  void addListener(VoidCallback listener) => controller.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      controller.removeListener(listener);
 }

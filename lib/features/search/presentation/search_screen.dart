@@ -272,7 +272,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       // it behind a search field and a list of text. What the user reads is
       // now what the screen paints.
       return Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: Colors.transparent,
         body: Column(
           children: [
             const SizedBox(height: 24),
@@ -321,6 +321,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final isLive = filter == SearchFilter.live;
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         titleSpacing: 16,
         actions: [

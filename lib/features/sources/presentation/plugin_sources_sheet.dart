@@ -11,6 +11,7 @@ import '../../../core/nuvio/data/nuvio_stream_service.dart';
 import '../../../core/nuvio/models/nuvio_models.dart';
 import '../../../core/services/download_service.dart';
 import '../../../core/utils/source_text.dart';
+import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../details/presentation/playback_launcher.dart';
 import '../../settings/presentation/player_settings_provider.dart';
@@ -310,7 +311,7 @@ class _PluginSourcesSheetState extends ConsumerState<PluginSourcesSheet> {
         .listen((progress) {
           if (_disposed) return;
           setState(() => _nuvioResult = progress);
-          _scheduleProbes();
+          unawaited(_scheduleProbes());
         });
   }
 
@@ -350,7 +351,19 @@ class _PluginSourcesSheetState extends ConsumerState<PluginSourcesSheet> {
 
   static const int _maxParallelProbes = 6;
 
-  void _scheduleProbes() {
+  /// Asked once per sheet: every probe after the first would get the same
+  /// answer, and asking costs a platform round trip.
+  Future<bool>? _meteredLookup;
+
+  /// Checks the links as the scrapers answer.
+  ///
+  /// Skipped on a metered link: a probe is several requests nobody asked for,
+  /// and the sheet is a place to look something up, not to spend data. The
+  /// player still fails over if the source it opens turns out dead.
+  Future<void> _scheduleProbes() async {
+    final metered = await (_meteredLookup ??= isOnMeteredNetwork());
+    if (metered || _disposed) return;
+
     final service = ref.read(linkProbeServiceProvider);
     for (final row in _allRows) {
       if (_probing.length >= _maxParallelProbes) return;
@@ -365,7 +378,7 @@ class _PluginSourcesSheetState extends ConsumerState<PluginSourcesSheet> {
             _probes[url] = result;
             _probing.remove(url);
           });
-          _scheduleProbes();
+          unawaited(_scheduleProbes());
         }),
       );
     }

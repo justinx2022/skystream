@@ -63,6 +63,14 @@ class StorageService {
   /// expose it and [_quarantineBox] needs the on-disk location.
   String? _hiveDir;
 
+  /// Whether [init] has opened the settings box.
+  ///
+  /// The appearance preferences below are the first settings a screen reads
+  /// through `build()` rather than through a user action, and a screen pumped
+  /// on its own in a test has no open box. "Nothing chosen yet" is the honest
+  /// answer there, and today's defaults are what it resolves to.
+  bool _settingsOpen = false;
+
   Future<void> init() async {
     final supportDir = await getApplicationSupportDirectory();
     _hiveDir = supportDir.path;
@@ -82,6 +90,7 @@ class StorageService {
     _settingsBox = boxes[1];
     _extensionsBox = boxes[2];
     _historyBox = boxes[4];
+    _settingsOpen = true;
   }
 
   /// Opens a box, and if it will not open, preserves whatever is on disk
@@ -202,6 +211,39 @@ class StorageService {
 
   String? getThemeMode() {
     return _settingsBox.get('theme_mode') as String?;
+  }
+
+  /// How the user wants the theme built, beyond light/dark.
+  ///
+  /// One JSON-free key per choice, each read as a name: the enums are the
+  /// vocabulary and `fromStorage` maps anything unrecognised back to the
+  /// default, so a value written by a newer build or edited by hand cannot
+  /// stop the app from painting.
+  Future<void> saveThemePalette(String palette) async {
+    await _settingsBox.put('theme_palette', palette);
+  }
+
+  String? getThemePalette() {
+    if (!_settingsOpen) return null;
+    return _settingsBox.get('theme_palette') as String?;
+  }
+
+  Future<void> saveThemeSurface(String surface) async {
+    await _settingsBox.put('theme_surface', surface);
+  }
+
+  String? getThemeSurface() {
+    if (!_settingsOpen) return null;
+    return _settingsBox.get('theme_surface') as String?;
+  }
+
+  Future<void> saveThemeBackdrop(String backdrop) async {
+    await _settingsBox.put('theme_backdrop', backdrop);
+  }
+
+  String? getThemeBackdrop() {
+    if (!_settingsOpen) return null;
+    return _settingsBox.get('theme_backdrop') as String?;
   }
 
   // --- Sidebar State ---

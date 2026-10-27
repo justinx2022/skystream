@@ -108,6 +108,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
 
     // Mobile layout: existing AppBar with TabBar
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Text(AppLocalizations.of(context)!.library),
         bottom: TabBar(

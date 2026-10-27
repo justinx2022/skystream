@@ -12,7 +12,9 @@ import '../../../core/addons/data/addon_stream_service.dart';
 import '../../../core/addons/models/addon_meta.dart';
 import '../../../core/addons/models/addon_stream_source.dart';
 import '../../../core/domain/entity/multimedia_item.dart';
+import '../../../core/network/link_probe_service.dart';
 import '../../../core/services/download_service.dart';
+import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../shared/focus/app_focus.dart';
 import '../../details/presentation/playback_launcher.dart';
@@ -77,6 +79,16 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
   final FocusNode _searchFocus = FocusNode();
   bool _searchOpen = false;
   String _searchQuery = '';
+
+  /// Verdicts per link URL, and the URLs a probe is currently out on. Both
+  /// outlive filter changes: a check costs a request, and its answer does not
+  /// depend on what the sheet happens to be showing.
+  final Map<String, LinkProbeResult> _probes = {};
+  final Set<String> _probing = {};
+
+  Future<bool>? _meteredLookup;
+
+  static const int _maxParallelProbes = 6;
 
   /// Whether the sheet was opened to download rather than to play. It is fixed
   /// for the lifetime of the sheet — both actions sit on every row, so the mode
@@ -158,7 +170,13 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
     }
     if (_disposed) return;
 
-    setState(() => _result = const AddonStreamProgress(isLoading: true));
+    setState(() {
+      _result = const AddonStreamProgress(isLoading: true);
+      // A new search is a new list; the old verdicts have nothing to say
+      // about it, and the old in-flight checks are theirs to finish.
+      _probes.clear();
+      _probing.clear();
+    });
     await _sub?.cancel();
     _sub = ref
         .read(addonStreamServiceProvider)
@@ -170,7 +188,41 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
         .listen((progress) {
           if (_disposed) return;
           setState(() => _result = progress);
+          unawaited(_scheduleProbes());
         });
+  }
+
+  /// Checks the links as they arrive, so a dead one is marked before it is
+  /// tapped rather than after the player has opened on it.
+  ///
+  /// Skipped on a metered link: a probe is several requests nobody asked for,
+  /// and the sheet is a place to look something up, not to spend data. The
+  /// player's own failover still covers a link that turns out dead.
+  Future<void> _scheduleProbes() async {
+    final metered = await (_meteredLookup ??= isOnMeteredNetwork());
+    if (metered || _disposed) return;
+
+    final service = ref.read(linkProbeServiceProvider);
+    for (final stream in _result.streams) {
+      if (_probing.length >= _maxParallelProbes) return;
+      final url = stream.url;
+      // Only a link this sheet can open is worth a request: an external row
+      // hands the URL to another app, which will find out for itself.
+      if (!stream.isDirect || url == null || !url.startsWith('http')) continue;
+      if (_probes.containsKey(url) || _probing.contains(url)) continue;
+      final headers = stream.proxyHeaders;
+      _probing.add(url);
+      unawaited(
+        service.probe(url, headers: headers).then((result) {
+          if (_disposed) return;
+          setState(() {
+            _probes[url] = result;
+            _probing.remove(url);
+          });
+          unawaited(_scheduleProbes());
+        }),
+      );
+    }
   }
 
   List<AddonStreamSource> get _visible => _result.streams
@@ -499,7 +551,14 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
               : '${_result.streams.length} links from ${_result.respondedCount} add-on(s)');
     final visible = _visible;
 
-    final topPick = visible.isNotEmpty ? visible.first : null;
+    // A pick that changes while add-ons are still answering is worse than no
+    // pick: the card would be one source for a second and another after, and
+    // the finger already travelling towards it would land on the wrong row.
+    // Nothing is promoted until the search has settled; filters applied by
+    // hand still re-rank at once, because the search is settled by then.
+    final topPick = !_result.isLoading && visible.isNotEmpty
+        ? visible.first
+        : null;
     final remainingReady = visible.length > 1
         ? visible.sublist(1)
         : <AddonStreamSource>[];
@@ -769,6 +828,8 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
                             padding: const EdgeInsets.only(bottom: 12),
                             child: _SourceRow(
                               stream: topPick,
+                              probe: _probes[topPick.url],
+                              probing: _probing.contains(topPick.url),
                               isBest: true,
                               autofocus: true,
                               downloadMode: _downloadMode,
@@ -791,6 +852,8 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
                         padding: EdgeInsets.only(top: slot == 0 ? 0 : 6),
                         child: _SourceRow(
                           stream: stream,
+                          probe: _probes[stream.url],
+                          probing: _probing.contains(stream.url),
                           isBest: false,
                           autofocus: topPick == null && slot == 0,
                           downloadMode: _downloadMode,
@@ -809,6 +872,8 @@ class _AddonSourcesSheetState extends ConsumerState<AddonSourcesSheet> {
 
 class _SourceRow extends StatefulWidget {
   final AddonStreamSource stream;
+  final LinkProbeResult? probe;
+  final bool probing;
   final bool isBest;
   final bool autofocus;
   final bool downloadMode;
@@ -820,6 +885,8 @@ class _SourceRow extends StatefulWidget {
     required this.isBest,
     required this.onPlay,
     required this.onDownload,
+    this.probe,
+    this.probing = false,
     this.autofocus = false,
     this.downloadMode = false,
   });
@@ -861,6 +928,10 @@ class _SourceRowState extends State<_SourceRow> {
     final onDownload = widget.onDownload;
 
     final size = stream.sizeLabel;
+    // An HLS master playlist names its renditions, so the probe knows the
+    // resolution the link actually serves - a better answer than the one the
+    // add-on put in the title.
+    final resolution = widget.probe?.resolutionLabel ?? stream.qualityLabel;
 
     return DpadFocusable(
       focusNode: _cardFocusNode,
@@ -900,7 +971,7 @@ class _SourceRowState extends State<_SourceRow> {
                       runSpacing: 4,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        QualityBadge(resolution: stream.qualityLabel),
+                        QualityBadge(resolution: resolution),
                         SourceTag(
                           text: 'STREMIO',
                           container: cs.primaryContainer,
@@ -961,6 +1032,13 @@ class _SourceRowState extends State<_SourceRow> {
                           ),
                       ],
                     ),
+                  ),
+                  // A link the check has found dead is marked before the tap,
+                  // not after the player has spent time on it.
+                  const SizedBox(width: 8),
+                  ProbeBadge(
+                    probe: widget.probe,
+                    probing: widget.probing,
                   ),
                 ],
               ),

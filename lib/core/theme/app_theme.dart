@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../shared/focus/app_focus.dart';
+import 'theme_presets.dart';
 
 class AppTheme {
   /// The bundled application type family.
@@ -33,7 +34,8 @@ class AppTheme {
     });
   }
 
-  // Premium Colors
+  // Premium Colors. Kept because the SnackBar is the one surface the scheme
+  // does not describe, and the dark defaults still name them.
   static const Color background = Color(0xFF0F0F13); // Deep dark blue-grey
   static const Color surface = Color(0xFF18181F);
   static const Color surfaceHighlight = Color(0xFF22222E);
@@ -53,6 +55,36 @@ class AppTheme {
   static const Color lightTextPrimary = Color(0xFF2C2521); // onSurface
   static const Color lightTextSecondary = Color(0xFF5C5C5C); // onSurfaceVariant
   static const Color lightCoral = Color(0xFFC63523); // Coral Accent
+
+  /// The light scheme the app shipped with, used when the wallpaper is not
+  /// available and no palette has been chosen. One literal, so the
+  /// never-opened-the-picker light theme cannot drift.
+  static const ColorScheme _warmLightScheme = ColorScheme.light(
+    primary: lightCoral,
+    onPrimary: Colors.white,
+    primaryContainer: Color(0xFFFFDAD4),
+    onPrimaryContainer: Color(0xFF410001),
+    secondary: Color(0xFF775651),
+    onSecondary: Colors.white,
+    secondaryContainer: lightSurfaceHighlight,
+    onSecondaryContainer: Color(0xFF2C1512),
+    tertiary: lightCoral,
+    onTertiary: Colors.white,
+    tertiaryContainer: Color(0xFFFFDAD4),
+    onTertiaryContainer: Color(0xFF410001),
+    surface: lightBackground,
+    onSurface: lightTextPrimary,
+    onSurfaceVariant: lightTextSecondary,
+    outline: Color(0xFFC9BBA6), // Warm sand outline
+    outlineVariant: Color(0xFFD9C9AE), // Soft warm tan outlineVariant
+    error: Color(0xFFBA1A1A),
+    onError: Colors.white,
+    surfaceContainerLowest: lightSurface,
+    surfaceContainerLow: Color(0xFFF7F3EE),
+    surfaceContainer: Color(0xFFEFEAE2),
+    surfaceContainerHigh: lightSurfaceHighlight,
+    surfaceContainerHighest: Color(0xFFE4D9C8),
+  );
 
   static SnackBarThemeData snackBarThemeFor(ColorScheme colorScheme) {
     final isDark = colorScheme.brightness == Brightness.dark;
@@ -111,249 +143,191 @@ class AppTheme {
   static TabBarThemeData _tabBarTheme(ColorScheme cs) =>
       TabBarThemeData(overlayColor: AppFocus.overlay(cs));
 
-  static ThemeData createDarkTheme(ColorScheme? dynamicScheme) {
-    _registerFontLicence();
-    var colorScheme =
-        dynamicScheme ??
-        ColorScheme.fromSeed(
-          seedColor: const Color(0xFF448AFF), // Blue Accent seed
-          brightness: Brightness.dark,
-          surface: const Color(0xFF000000), // Default surface
-        );
-
-    // Ensure surface is always Pitch Black for list items/cards
-    colorScheme = colorScheme.copyWith(surface: const Color(0xFF000000));
-
-    return ThemeData(
-      useMaterial3: true,
+  static ThemeData createDarkTheme(
+    ColorScheme? dynamicScheme, {
+    AppPalette palette = AppPalette.dynamic,
+    AppSurfaceStyle surface = AppSurfaceStyle.automatic,
+    AppBackdrop backdrop = AppBackdrop.none,
+  }) {
+    return _build(
       brightness: Brightness.dark,
-      fontFamily: fontFamily,
-      scaffoldBackgroundColor: const Color(
-        0xFF000000,
-      ), // Pure Black Background for Screens
-      // Dialog Theme (Premium Grey)
-      dialogTheme: const DialogThemeData(
-        backgroundColor: Color(0xFF18181F),
-        surfaceTintColor: Colors.transparent,
-        titleTextStyle: TextStyle(
-          fontFamily: fontFamily,
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFFF9FAFB),
-        ),
-      ),
-
-      // Bottom Sheet Theme (Premium Grey)
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Color(0xFF18181F),
-        surfaceTintColor: Colors.transparent,
-        modalBackgroundColor: Color(0xFF18181F),
-      ),
-
-      // Card Theme (Pitch Black for List Items)
-      cardTheme: const CardThemeData(
-        color: Color(0xFF000000),
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      ),
-
-      // Material 3 Color Scheme
-      colorScheme: colorScheme,
-
-      // Typography
-      textTheme: ThemeData.dark().textTheme
-          .apply(fontFamily: fontFamily)
-          .copyWith(
-            displayLarge: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFF9FAFB),
-            ),
-            displayMedium: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFF9FAFB),
-            ),
-            displaySmall: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFFF9FAFB),
-            ),
-            headlineMedium: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFF9FAFB),
-            ),
-            titleLarge: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFF9FAFB),
-            ),
-            titleMedium: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFF9FAFB),
-            ),
-            bodyLarge: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 16,
-              color: Color(0xFFE5E7EB),
-            ),
-            bodyMedium: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 14,
-              color: Color(0xFF9CA3AF),
-            ),
-            // WCAG AA (4.5:1) for 12 sp body text, which is the settings
-            // subtitle stating the current value of every setting. The old
-            // 0xFF6B7280 measured 4.34:1 on the pure-black scaffold and only
-            // 3.65:1 on the 0xFF18181F dialog and bottom sheet; this is the
-            // same slate lifted 15% and clears both (5.51:1 and 4.63:1).
-            bodySmall: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 12,
-              color: Color(0xFF7B8393),
-            ),
-            labelLarge: const TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.1,
-              color: Color(0xFFF9FAFB),
-            ),
-          ),
-
-      // AppBar
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF000000),
-        elevation: 0,
-        centerTitle: false,
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
-      ),
-
-      // Bottom Navigation
-      bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: const Color(
-          0xFF000000,
-        ), // Pure Black matches background
-        selectedItemColor: colorScheme.primary,
-        unselectedItemColor: colorScheme.onSurfaceVariant,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-        showSelectedLabels: false,
-        showUnselectedLabels: false,
-        landscapeLayout: BottomNavigationBarLandscapeLayout.spread,
-      ),
-
-      // Keep SnackBars visually consistent with the dark application instead
-      // of Material's default inverse (light) surface.
-      snackBarTheme: snackBarThemeFor(colorScheme),
-
-      // Input Decoration
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFF18181F), // Slightly lighter grey for fields
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: colorScheme.primary, width: 2),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 20,
-          vertical: 16,
-        ),
-      ),
-
-      dividerColor: const Color(0xFF22222E),
-      dividerTheme: const DividerThemeData(
-        thickness: 1,
-        space: 1,
-        color: Color(0xFF22222E),
-      ),
-
-      // One focus indicator for every Material control. See
-      // [_filledButtonTheme] for why this is a theme and not a widget.
-      filledButtonTheme: _filledButtonTheme(colorScheme),
-      elevatedButtonTheme: _elevatedButtonTheme(colorScheme),
-      textButtonTheme: _textButtonTheme(colorScheme),
-      outlinedButtonTheme: _outlinedButtonTheme(colorScheme),
-      iconButtonTheme: _iconButtonTheme(colorScheme),
-      tabBarTheme: _tabBarTheme(colorScheme),
-      // Every bare [InkWell] and [ListTile] in the app reads this one, so a
-      // row that is not a button still shows where the remote is.
-      focusColor: colorScheme.onSurface.withValues(alpha: 0.16),
-
-      // Switch Theme
-      switchTheme: SwitchThemeData(
-        thumbIcon: WidgetStateProperty.resolveWith<Icon?>((states) {
-          if ((states.contains(WidgetState.focused) &&
-                  FocusVisibility.visible) ||
-              states.contains(WidgetState.hovered)) {
-            if (states.contains(WidgetState.selected)) {
-              return const Icon(Icons.check_rounded, size: 14);
-            } else {
-              return const Icon(Icons.close_rounded, size: 14);
-            }
-          }
-          return null;
-        }),
-      ),
+      dynamicScheme: dynamicScheme,
+      palette: palette,
+      surfaceStyle: surface,
+      backdrop: backdrop,
     );
   }
 
-  static ThemeData createLightTheme(ColorScheme? dynamicScheme) {
-    _registerFontLicence();
-    const colorScheme = ColorScheme.light(
-      primary: lightCoral,
-      onPrimary: Colors.white,
-      primaryContainer: Color(0xFFFFDAD4),
-      onPrimaryContainer: Color(0xFF410001),
-      secondary: Color(0xFF775651),
-      onSecondary: Colors.white,
-      secondaryContainer: lightSurfaceHighlight,
-      onSecondaryContainer: Color(0xFF2C1512),
-      tertiary: lightCoral,
-      onTertiary: Colors.white,
-      tertiaryContainer: Color(0xFFFFDAD4),
-      onTertiaryContainer: Color(0xFF410001),
-      surface: lightBackground,
-      onSurface: lightTextPrimary,
-      onSurfaceVariant: lightTextSecondary,
-      outline: Color(0xFFC9BBA6), // Warm sand outline
-      outlineVariant: Color(0xFFD9C9AE), // Soft warm tan outlineVariant
-      error: Color(0xFFBA1A1A),
-      onError: Colors.white,
-      surfaceContainerLowest: lightSurface,
-      surfaceContainerLow: Color(0xFFF7F3EE),
-      surfaceContainer: Color(0xFFEFEAE2),
-      surfaceContainerHigh: lightSurfaceHighlight,
-      surfaceContainerHighest: Color(0xFFE4D9C8),
+  static ThemeData createLightTheme(
+    ColorScheme? dynamicScheme, {
+    AppPalette palette = AppPalette.dynamic,
+    AppSurfaceStyle surface = AppSurfaceStyle.automatic,
+    AppBackdrop backdrop = AppBackdrop.none,
+  }) {
+    return _build(
+      brightness: Brightness.light,
+      dynamicScheme: dynamicScheme,
+      palette: palette,
+      surfaceStyle: surface,
+      backdrop: backdrop,
     );
+  }
+
+  /// The scheme every role is read from.
+  ///
+  /// The wallpaper is passed straight through when the palette is dynamic,
+  /// because that scheme is the platform's answer and re-seeding it would
+  /// only lose what it said. With no wallpaper - a desktop, a TV, a phone with
+  /// dynamic colour off - dynamic falls back to the pair the app shipped
+  /// with: blue at night, warm coral in daylight.
+  static ColorScheme _schemeFor({
+    required Brightness brightness,
+    required ColorScheme? dynamicScheme,
+    required AppPalette palette,
+  }) {
+    if (palette == AppPalette.dynamic) {
+      if (dynamicScheme != null) {
+        return dynamicScheme.copyWith(brightness: brightness);
+      }
+      return brightness == Brightness.dark
+          ? ColorScheme.fromSeed(seedColor: primary, brightness: brightness)
+          : _warmLightScheme;
+    }
+    return ColorScheme.fromSeed(
+      seedColor: palette.seed ?? primary,
+      brightness: brightness,
+    );
+  }
+
+  static ThemeData _build({
+    required Brightness brightness,
+    required ColorScheme? dynamicScheme,
+    required AppPalette palette,
+    required AppSurfaceStyle surfaceStyle,
+    required AppBackdrop backdrop,
+  }) {
+    _registerFontLicence();
+    final bool isDark = brightness == Brightness.dark;
+    final baseScheme = _schemeFor(
+      brightness: brightness,
+      dynamicScheme: dynamicScheme,
+      palette: palette,
+    );
+    final surfaces = resolveSurfaceColors(
+      style: surfaceStyle,
+      brightness: brightness,
+      scheme: baseScheme,
+    );
+
+    // The surface roles move to the chosen surface style; every text role
+    // stays the scheme's, which is what makes a palette change tint the type
+    // and not only the buttons.
+    final colorScheme = baseScheme.copyWith(
+      surface: surfaces.surface,
+      surfaceContainerLowest: surfaces.containerLow,
+      surfaceContainerLow: surfaces.containerLow,
+      surfaceContainer: surfaces.surface,
+      surfaceContainerHigh: surfaces.containerHigh,
+      surfaceContainerHighest: surfaces.containerHighest,
+      surfaceDim: surfaces.surface,
+      surfaceBright: surfaces.containerHigh,
+      outline: surfaces.outline,
+      outlineVariant: surfaces.outlineVariant,
+      onSurface: baseScheme.onSurface,
+      onSurfaceVariant: baseScheme.onSurfaceVariant,
+    );
+
+    final textTheme = ThemeData(
+      brightness: brightness,
+      colorScheme: colorScheme,
+    ).textTheme
+        .apply(fontFamily: fontFamily)
+        .copyWith(
+          displayLarge: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+            color: colorScheme.onSurface,
+          ),
+          displayMedium: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: colorScheme.onSurface,
+          ),
+          displaySmall: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: colorScheme.onSurface,
+          ),
+          headlineMedium: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+          titleLarge: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+          titleMedium: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: colorScheme.onSurface,
+          ),
+          bodyLarge: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 16,
+            color: colorScheme.onSurface,
+          ),
+          bodyMedium: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 14,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          // Full-strength onSurfaceVariant, never a fraction of it. The old
+          // light literal at 80% measured 3.81:1 and failed AA; the scheme
+          // role at full strength clears every surface this theme paints.
+          bodySmall: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 12,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          labelLarge: TextStyle(
+            fontFamily: fontFamily,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.1,
+            color: colorScheme.onSurface,
+          ),
+        );
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: brightness,
       fontFamily: fontFamily,
-      scaffoldBackgroundColor: colorScheme.surface,
+      colorScheme: colorScheme,
+      textTheme: textTheme,
+      // The opaque base every screen paints on. The ambient backdrop is drawn
+      // *inside the shell*, behind its transparent tab scaffolds (see
+      // `AppBackdropLayer`), so the scaffold colour stays honest here: pushed
+      // routes, dialogs and every widget that composites with this colour -
+      // the details hero's fade into the page, for one - keep an opaque answer.
+      scaffoldBackgroundColor: surfaces.scaffold,
+      extensions: <ThemeExtension<dynamic>>[
+        AppSurfaceTokens(
+          style: surfaceStyle,
+          backdrop: backdrop,
+          base: surfaces.scaffold,
+        ),
+      ],
 
-      // Dialog Theme
       dialogTheme: DialogThemeData(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: surfaces.dialog,
         surfaceTintColor: Colors.transparent,
         titleTextStyle: TextStyle(
           fontFamily: fontFamily,
@@ -362,74 +336,27 @@ class AppTheme {
           color: colorScheme.onSurface,
         ),
       ),
-
-      // Bottom Sheet Theme
       bottomSheetTheme: BottomSheetThemeData(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: surfaces.sheet,
         surfaceTintColor: Colors.transparent,
-        modalBackgroundColor: colorScheme.surface,
+        modalBackgroundColor: surfaces.sheet,
       ),
-
-      // Card Theme
       cardTheme: CardThemeData(
-        color: colorScheme.surfaceContainerLowest,
+        color: surfaces.card,
         surfaceTintColor: Colors.transparent,
-        elevation: 1,
+        elevation: isDark ? 0 : 1,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
 
-      // Material 3 Color Scheme
-      colorScheme: colorScheme,
-
-      // Typography
-      textTheme: ThemeData.light().textTheme
-          .apply(fontFamily: fontFamily)
-          .copyWith(
-            displayLarge: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              color: colorScheme.onSurface,
-            ),
-            headlineMedium: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurface,
-            ),
-            titleLarge: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurface,
-            ),
-            bodyLarge: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 16,
-              color: colorScheme.onSurface,
-            ),
-            bodyMedium: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 14,
-              color: colorScheme.onSurfaceVariant,
-            ),
-            // Full-strength onSurfaceVariant, not 80% of it: the alpha
-            // blended 0xFF5C5C5C down to 0xFF7B7A79 on the 0xFFF5F1EC
-            // scaffold, which is 3.81:1 and fails WCAG AA. Undimmed it is
-            // 5.95:1 on the scaffold and 4.80:1 on the darkest container.
-            bodySmall: TextStyle(
-              fontFamily: fontFamily,
-              fontSize: 12,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-
-      // AppBar
       appBarTheme: AppBarTheme(
-        backgroundColor: colorScheme.surface,
+        // Transparent so a shell backdrop reads behind the bar too. On a route
+        // pushed above the shell the scaffold underneath is opaque, so the bar
+        // still shows exactly the page colour it always did.
+        backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
         scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         iconTheme: IconThemeData(color: colorScheme.onSurface),
         titleTextStyle: TextStyle(
           color: colorScheme.onSurface,
@@ -439,38 +366,47 @@ class AppTheme {
         ),
       ),
 
-      // Bottom Navigation
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: surfaces.scaffold,
         selectedItemColor: colorScheme.primary,
         unselectedItemColor: colorScheme.onSurfaceVariant,
         type: BottomNavigationBarType.fixed,
-        elevation: 8,
+        elevation: isDark ? 0 : 8,
         showSelectedLabels: false,
         showUnselectedLabels: false,
+        landscapeLayout: BottomNavigationBarLandscapeLayout.spread,
       ),
 
-      // Input Decoration
+      // Keep SnackBars consistent with the application instead of Material's
+      // default inverse (light) surface.
+      snackBarTheme: snackBarThemeFor(colorScheme),
+
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: colorScheme.surfaceContainerHigh,
+        fillColor: surfaces.input,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(isDark ? 16 : 12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(isDark ? 16 : 12),
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+          borderRadius: BorderRadius.circular(isDark ? 16 : 12),
+          borderSide: BorderSide(
+            color: colorScheme.primary,
+            width: isDark ? 2 : 1.5,
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 14,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: isDark ? 20 : 16,
+          vertical: isDark ? 16 : 14,
         ),
       ),
 
-      // Chip Theme
       chipTheme: ChipThemeData(
-        backgroundColor: colorScheme.surfaceContainerHigh,
+        backgroundColor: surfaces.containerHigh,
         disabledColor: colorScheme.onSurface.withValues(alpha: 0.12),
         selectedColor: colorScheme.primary.withValues(alpha: 0.15),
         secondarySelectedColor: colorScheme.primary.withValues(alpha: 0.15),
@@ -483,7 +419,6 @@ class AppTheme {
         ),
       ),
 
-      // Switch Theme
       switchTheme: SwitchThemeData(
         thumbIcon: WidgetStateProperty.resolveWith<Icon?>((states) {
           if ((states.contains(WidgetState.focused) &&
@@ -499,7 +434,6 @@ class AppTheme {
         }),
       ),
 
-      // Slider Theme
       sliderTheme: SliderThemeData(
         activeTrackColor: colorScheme.primary,
         inactiveTrackColor: colorScheme.primary.withValues(alpha: 0.24),
@@ -507,36 +441,30 @@ class AppTheme {
         overlayColor: colorScheme.primary.withValues(alpha: 0.12),
       ),
 
-      // Floating Action Button Theme
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
       ),
 
-      // SnackBar Theme
-      snackBarTheme: snackBarThemeFor(colorScheme),
-
-      // Ripple / Splash / Highlights
       splashColor: colorScheme.primary.withValues(alpha: 0.1),
       hoverColor: colorScheme.primary.withValues(alpha: 0.04),
       highlightColor: colorScheme.primary.withValues(alpha: 0.05),
 
-      // Selection Text Theme
       textSelectionTheme: TextSelectionThemeData(
         cursorColor: colorScheme.primary,
         selectionColor: colorScheme.primary.withValues(alpha: 0.3),
         selectionHandleColor: colorScheme.primary,
       ),
 
-      dividerColor: colorScheme.outlineVariant,
+      dividerColor: surfaces.divider,
       dividerTheme: DividerThemeData(
         thickness: 1,
         space: 1,
-        color: colorScheme.outlineVariant,
+        color: surfaces.divider,
       ),
 
-      // The same focus indicator as the dark theme; the ring colour comes
-      // from the scheme, so it is near-black here and near-white there.
+      // One focus indicator for every Material control. See
+      // [_filledButtonTheme] for why this is a theme and not a widget.
       filledButtonTheme: _filledButtonTheme(colorScheme),
       elevatedButtonTheme: _elevatedButtonTheme(colorScheme),
       textButtonTheme: _textButtonTheme(colorScheme),

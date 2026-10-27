@@ -40,15 +40,18 @@ import 'player_panel_row.dart';
 /// and the keyboard.
 class SubtitleSearchPage extends ConsumerStatefulWidget {
   const SubtitleSearchPage({
-    required this.controller,
     required this.onDone,
+    this.controller,
     this.target,
     this.isTv = false,
     this.onFile,
     super.key,
   });
 
-  final VlcPlayerController controller;
+  /// The engine a picked file goes to when [onFile] cannot take it. Null on a
+  /// player whose engine has its own way of taking files, which always passes
+  /// [onFile].
+  final VlcPlayerController? controller;
 
   /// Takes a downloaded result, as a file on this device, and says whether it
   /// could be used. Null hands the file to [controller] instead.
@@ -248,10 +251,11 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     var used = false;
     try {
       final onFile = widget.onFile;
+      final controller = widget.controller;
       if (onFile != null) {
         used = await onFile(Uri.file(path), subtitle);
-      } else {
-        await widget.controller.addSubtitle(Uri.file(path));
+      } else if (controller != null) {
+        await controller.addSubtitle(Uri.file(path));
         used = true;
       }
     } catch (_) {

@@ -21,6 +21,30 @@ class SettingsRepository {
     return _storageService.getThemeMode();
   }
 
+  Future<void> saveThemePalette(String palette) async {
+    await _storageService.saveThemePalette(palette);
+  }
+
+  String? getThemePalette() {
+    return _storageService.getThemePalette();
+  }
+
+  Future<void> saveThemeSurface(String surface) async {
+    await _storageService.saveThemeSurface(surface);
+  }
+
+  String? getThemeSurface() {
+    return _storageService.getThemeSurface();
+  }
+
+  Future<void> saveThemeBackdrop(String backdrop) async {
+    await _storageService.saveThemeBackdrop(backdrop);
+  }
+
+  String? getThemeBackdrop() {
+    return _storageService.getThemeBackdrop();
+  }
+
   Future<void> setSidebarExpanded(bool expanded) async {
     await _storageService.setSidebarExpanded(expanded);
   }

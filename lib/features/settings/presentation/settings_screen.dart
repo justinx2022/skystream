@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/utils/layout_constants.dart';
 import '../../../core/theme/theme_provider.dart';
+import '../../../core/theme/theme_presets.dart';
 
 import 'widgets/settings_widgets.dart';
 import 'widgets/settings_dialogs.dart';
@@ -31,6 +32,7 @@ class SettingsScreen extends ConsumerWidget {
     final generalSettings = ref.watch(generalSettingsProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       appBar: AppBar(title: Text(l10n.settings)),
       body: Center(
         child: ConstrainedBox(
@@ -98,15 +100,27 @@ class SettingsScreen extends ConsumerWidget {
     GeneralSettings generalSettings,
   ) {
     final fullScreenModeEnabled = ref.watch(fullScreenModeProvider);
+    final customization = ref.watch(themeCustomizationProvider);
+    final modeLabel = themeMode == ThemeMode.system
+        ? l10n.system
+        : (themeMode == ThemeMode.dark ? l10n.dark : l10n.light);
+    // Only the choices that differ from what the app would do anyway are
+    // named: "Dark" alone says everything there is to say until the palette
+    // or surface has been moved off its default.
+    final themeLabel = <String>[
+      modeLabel,
+      if (customization.palette != AppPalette.dynamic)
+        appearancePaletteLabel(customization.palette, l10n),
+      if (customization.surface != AppSurfaceStyle.automatic)
+        appearanceSurfaceLabel(customization.surface, l10n),
+    ].join(' · ');
     return SettingsGroup(
       title: l10n.general,
       children: [
         SettingsTile(
           icon: Icons.dark_mode_rounded,
           title: l10n.appTheme,
-          subtitle: themeMode == ThemeMode.system
-              ? l10n.system
-              : (themeMode == ThemeMode.dark ? l10n.dark : l10n.light),
+          subtitle: themeLabel,
           onTap: () => showThemeDialog(context, ref, themeMode),
         ),
         SettingsTile(

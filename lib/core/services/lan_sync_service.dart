@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../domain/entity/multimedia_item.dart';
 import '../storage/storage_service.dart';
@@ -19,6 +20,45 @@ class LanSyncService {
   static const int _udpPort = 42124;
   static const int _httpPort = 42125;
   static const Duration _broadcastInterval = Duration(seconds: 25);
+
+  /// A peer's payload is a watch history - kilobytes. Read with a ceiling so a
+  /// hostile or broken peer cannot make this process hold an unbounded body in
+  /// memory, in either direction.
+  static const int _kMaxSyncBodyBytes = 2 * 1024 * 1024;
+
+  /// Whether [address] is on a network this device can be a peer of.
+  ///
+  /// The discovery ping says where to send the local watch history, and it
+  /// arrives as a datagram any machine that can reach the socket may send.
+  /// Without this check one forged ping sends the whole history to a server of
+  /// the sender's choosing; likewise a forwarded port would let the internet
+  /// read it. A household peer is always private, link-local or loopback.
+  static bool _isPrivateAddress(InternetAddress address) {
+    if (address.isLoopback) return true;
+    final raw = address.rawAddress;
+    if (address.type == InternetAddressType.IPv4 && raw.length == 4) {
+      return raw[0] == 10 ||
+          (raw[0] == 172 && raw[1] >= 16 && raw[1] <= 31) ||
+          (raw[0] == 192 && raw[1] == 168) ||
+          (raw[0] == 169 && raw[1] == 254);
+    }
+    if (address.type == InternetAddressType.IPv6 && raw.length == 16) {
+      // fc00::/7 unique-local, fe80::/10 link-local.
+      return (raw[0] & 0xfe) == 0xfc ||
+          (raw[0] == 0xfe && (raw[1] & 0xc0) == 0x80);
+    }
+    return false;
+  }
+
+  /// Reads [body] into memory, or null when it is longer than a history can be.
+  static Future<Uint8List?> _readBounded(Stream<List<int>> body) async {
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in body) {
+      builder.add(chunk);
+      if (builder.length > _kMaxSyncBodyBytes) return null;
+    }
+    return builder.takeBytes();
+  }
 
   StorageService? _storageService;
   RawDatagramSocket? _udpSocket;
@@ -107,6 +147,15 @@ class LanSyncService {
 
   Future<void> _handleHttpRequest(HttpRequest request) async {
     try {
+      // Only a device on this network is a peer. A forwarded port would
+      // otherwise serve the whole watch history to the internet.
+      final remote = request.connectionInfo?.remoteAddress;
+      if (remote == null || !_isPrivateAddress(remote)) {
+        request.response.statusCode = HttpStatus.forbidden;
+        await request.response.close();
+        return;
+      }
+
       final path = request.uri.path;
       if (path == '/api/sync/history' && request.method == 'GET') {
         final history = _storageService?.getWatchHistory() ?? [];
@@ -119,8 +168,13 @@ class LanSyncService {
       }
 
       if (path == '/api/sync/push' && request.method == 'POST') {
-        final content = await utf8.decodeStream(request);
-        final dynamic decoded = jsonDecode(content);
+        final body = await _readBounded(request);
+        if (body == null) {
+          request.response.statusCode = HttpStatus.requestEntityTooLarge;
+          await request.response.close();
+          return;
+        }
+        final dynamic decoded = jsonDecode(utf8.decode(body));
         int merged = 0;
         if (decoded is List) {
           merged = await _mergeRemoteHistory(decoded.cast<Map<String, dynamic>>());
@@ -171,6 +225,9 @@ class LanSyncService {
       final raw = utf8.decode(datagram.data);
       final dynamic json = jsonDecode(raw);
       if (json is Map && json['app'] == 'skystream' && json['type'] == 'lan_sync_ping') {
+        // The ping names the address to send our history to, so it is only
+        // trusted from this network.
+        if (!_isPrivateAddress(datagram.address)) return;
         final peerDeviceId = json['deviceId']?.toString();
         final peerPort = json['httpPort'] as int? ?? _httpPort;
         if (peerDeviceId != null && peerDeviceId != _deviceId) {
@@ -190,8 +247,8 @@ class LanSyncService {
       final getReq = await client.getUrl(Uri.parse('http://$ip:$port/api/sync/history'));
       final getRes = await getReq.close();
       if (getRes.statusCode == HttpStatus.ok) {
-        final body = await utf8.decodeStream(getRes);
-        final dynamic list = jsonDecode(body);
+        final body = await _readBounded(getRes);
+        final dynamic list = body == null ? null : jsonDecode(utf8.decode(body));
         if (list is List) {
           await _mergeRemoteHistory(list.cast<Map<String, dynamic>>());
         }

@@ -261,6 +261,59 @@
   "customDohUrlLabel": "Custom DoH URL",
   "enterCustomDohUrl": "Enter your own DoH URL",
   "chooseTheme": "Choose Theme",
+  "appearancePalette": "Palette",
+  "@appearancePalette": {
+    "description": "Appearance picker section: which colour family the Material scheme is generated from."
+  },
+  "appearancePaletteDynamic": "Dynamic",
+  "@appearancePaletteDynamic": {
+    "description": "Palette option: take the device wallpaper's colours (Android 12+)."
+  },
+  "appearancePaletteBlue": "Blue",
+  "appearancePaletteEmerald": "Emerald",
+  "appearancePaletteCoral": "Coral",
+  "appearancePaletteViolet": "Violet",
+  "appearancePaletteAmber": "Amber",
+  "appearanceSurface": "Surface",
+  "@appearanceSurface": {
+    "description": "Appearance picker section: the background and container colours."
+  },
+  "appearanceSurfaceAutomatic": "Automatic",
+  "@appearanceSurfaceAutomatic": {
+    "description": "Surface option: pure black at night, warm paper in daylight - the app's original pair."
+  },
+  "appearanceSurfaceAmoled": "AMOLED",
+  "@appearanceSurfaceAmoled": {
+    "description": "Surface option: pure black, for OLED panels."
+  },
+  "appearanceSurfaceMidnight": "Midnight",
+  "@appearanceSurfaceMidnight": {
+    "description": "Surface option: dark blue-grey instead of black."
+  },
+  "appearanceSurfaceStandard": "Standard",
+  "@appearanceSurfaceStandard": {
+    "description": "Surface option: surfaces derived from the chosen palette's scheme."
+  },
+  "appearanceSurfacePaper": "Paper",
+  "@appearanceSurfacePaper": {
+    "description": "Surface option: warm cream tones in the light theme."
+  },
+  "appearanceBackdrop": "Ambient backdrop",
+  "@appearanceBackdrop": {
+    "description": "Appearance picker section: an optional gradient painted behind the whole app."
+  },
+  "appearanceBackdropAurora": "Aurora",
+  "@appearanceBackdropAurora": {
+    "description": "Backdrop option: teal-to-violet gradient."
+  },
+  "appearanceBackdropDusk": "Dusk",
+  "@appearanceBackdropDusk": {
+    "description": "Backdrop option: magenta-to-indigo gradient."
+  },
+  "appearanceBackdropEmber": "Ember",
+  "@appearanceBackdropEmber": {
+    "description": "Backdrop option: warm orange-to-red gradient."
+  },
   "resetDataDialogTitle": "Reset Data?",
   "resetDataDialogContent": "This will clear Settings, Favorites, and History. Your installed Extensions will NOT be deleted.",
   "factoryResetDialogTitle": "Factory Reset?",

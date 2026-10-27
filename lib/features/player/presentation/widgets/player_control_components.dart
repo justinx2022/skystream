@@ -15,6 +15,11 @@ class PlayerTopBar extends StatelessWidget {
   final bool isTv;
   final FocusNode? backFocusNode;
 
+  /// What sits after the title: the up-next press while there is an episode
+  /// to move to, and nothing otherwise. Kept out of the title's column so it
+  /// never truncates the title to make room for a control.
+  final Widget? trailing;
+
   const PlayerTopBar({
     super.key,
     required this.title,
@@ -22,6 +27,7 @@ class PlayerTopBar extends StatelessWidget {
     this.onBack,
     this.isTv = false,
     this.backFocusNode,
+    this.trailing,
   });
 
   /// The bar's padding inside the top safe area, which is also what places its
@@ -89,6 +95,7 @@ class PlayerTopBar extends StatelessWidget {
                   ],
                 ),
               ),
+              if (trailing != null) trailing!,
             ],
           ),
         ),

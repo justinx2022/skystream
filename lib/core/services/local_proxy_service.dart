@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../media/cenc.dart';
@@ -208,11 +209,26 @@ class LocalProxyService {
       _playlists.remove(_playlists.keys.first);
     }
 
-    final uuid =
-        "${DateTime.now().millisecondsSinceEpoch}_${(content.length % 1000)}";
-    _playlists[uuid] = content;
-    return "http://127.0.0.1:$_serverPort/$uuid.m3u8";
+    final id = _newPlaylistId();
+    _playlists[id] = content;
+    return "http://127.0.0.1:$_serverPort/$id.m3u8";
   }
+
+  /// The playlist's name in the local URL.
+  ///
+  /// Random rather than derived from the clock and the body length: that pair
+  /// both repeated itself when two playlists were generated in the same
+  /// millisecond, and was guessable enough for another app on the handset to
+  /// read a playlist it never asked for.
+  String _newPlaylistId() {
+    final bytes = Uint8List(12);
+    for (var i = 0; i < bytes.length; i++) {
+      bytes[i] = _random.nextInt(256);
+    }
+    return _hex(bytes);
+  }
+
+  static final Random _random = Random.secure();
 
   /// Returns a proxied URL for the given target URL, with optional sticky headers and options.
   String getProxyUrl(

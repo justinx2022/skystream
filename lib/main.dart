@@ -17,6 +17,7 @@ import 'package:media_kit/media_kit.dart';
 import 'core/theme/theme_provider.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/theme_presets.dart' show AppPalette;
 import 'core/storage/storage_service.dart';
 import 'core/network/doh_service.dart';
 
@@ -453,6 +454,7 @@ class _MyAppState extends ConsumerState<MyApp> {
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(appThemeModeProvider);
+    final customization = ref.watch(themeCustomizationProvider);
     final appRouter = ref.watch(appRouterProvider);
     final locale = ref.watch(localeProvider);
     final profileAsync = ref.watch(deviceProfileProvider);
@@ -469,10 +471,12 @@ class _MyAppState extends ConsumerState<MyApp> {
 
     return DynamicColorBuilder(
       builder: (lightDynamic, darkDynamic) {
-        ColorScheme? darkScheme;
-        if (darkDynamic != null) {
-          darkScheme = darkDynamic;
-        }
+        // A wallpaper only speaks for the dynamic palette. Picking a seed says
+        // "generate from this instead", so the platform scheme is dropped
+        // rather than blended with it.
+        final dynamicPalette = customization.palette == AppPalette.dynamic;
+        final lightScheme = dynamicPalette ? lightDynamic : null;
+        final darkScheme = dynamicPalette ? darkDynamic : null;
 
         final materialApp = MaterialApp.router(
           scaffoldMessengerKey: ref
@@ -481,10 +485,18 @@ class _MyAppState extends ConsumerState<MyApp> {
           title: 'SkyStream',
           debugShowCheckedModeBanner: false,
           themeMode: themeMode,
-          theme: lightDynamic != null
-              ? AppTheme.createLightTheme(lightDynamic)
-              : AppTheme.createLightTheme(null),
-          darkTheme: AppTheme.createDarkTheme(darkScheme),
+          theme: AppTheme.createLightTheme(
+            lightScheme,
+            palette: customization.palette,
+            surface: customization.surface,
+            backdrop: customization.backdrop,
+          ),
+          darkTheme: AppTheme.createDarkTheme(
+            darkScheme,
+            palette: customization.palette,
+            surface: customization.surface,
+            backdrop: customization.backdrop,
+          ),
           routerConfig: appRouter,
           locale: locale,
           localizationsDelegates: const [

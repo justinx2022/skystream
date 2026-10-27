@@ -16,6 +16,24 @@ import 'package:skystream/l10n/generated/app_localizations.dart';
 /// focused card, and a probe landing under the user never moves the row they
 /// are standing on.
 void main() {
+  // The sheet checks links only on an unmetered connection. The test binding
+  // has no connectivity plugin, and the fallback for that is the cautious
+  // answer - metered - which would leave every probe unscheduled.
+  const connectivity = MethodChannel('dev.fluttercommunity.plus/connectivity');
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          connectivity,
+          (call) async => call.method == 'check' ? <String>['wifi'] : null,
+        );
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivity, null);
+  });
+
   testWidgets('DOWN steps card to card, never onto an action button', (
     tester,
   ) async {
