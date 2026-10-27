@@ -1098,7 +1098,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<DebridProvider>(
-              value: _provider,
+              initialValue: _provider,
               decoration: const InputDecoration(
                 labelText: 'Provider',
                 border: OutlineInputBorder(),

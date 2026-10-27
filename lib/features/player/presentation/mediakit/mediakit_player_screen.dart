@@ -77,7 +77,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   Episode? _nextEpisodeOffer;
   bool _nextEpisodeDeclined = false;
 
-  final List<StreamSubscription> _subscriptions = [];
+  final List<StreamSubscription<Object?>> _subscriptions = [];
   Duration? _dragPosition;
   bool _isDragging = false;
 
@@ -189,7 +189,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         });
 
     _player = Player(
-      configuration: PlayerConfiguration(
+      configuration: const PlayerConfiguration(
         title: 'SkyStream',
         bufferSize: 64 * 1024 * 1024, // 64 MB ring buffer (fast & safe for mobile & desktop)
         logLevel: MPVLogLevel.error,
@@ -332,7 +332,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       force: true,
     );
     _tracker?.finish();
-    _player.stop();
+    await _player.stop();
 
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
@@ -1287,7 +1287,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                         // is nothing is an answer; a press that does nothing
                         // reads as a bug.
                         if (streams.isEmpty)
-                          PanelEmpty(
+                          const PanelEmpty(
                             text:
                                 'No other sources were found for this title.',
                           )
@@ -1453,7 +1453,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                     child: Video(
                       controller: _videoController,
                       fit: _fit,
-                      controls: NoVideoControls,
+                      // media_kit's NoVideoControls is `const ... = null`
+                      // with no type, so it reads as dynamic and does not
+                      // assign to the builder type. Null is what it means.
+                      controls: null,
                     ),
                   ),
 

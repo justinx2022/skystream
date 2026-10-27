@@ -1083,6 +1083,108 @@ abstract class AppLocalizations {
   /// **'Choose Theme'**
   String get chooseTheme;
 
+  /// Appearance picker section: which colour family the Material scheme is generated from.
+  ///
+  /// In en, this message translates to:
+  /// **'Palette'**
+  String get appearancePalette;
+
+  /// Palette option: take the device wallpaper's colours (Android 12+).
+  ///
+  /// In en, this message translates to:
+  /// **'Dynamic'**
+  String get appearancePaletteDynamic;
+
+  /// No description provided for @appearancePaletteBlue.
+  ///
+  /// In en, this message translates to:
+  /// **'Blue'**
+  String get appearancePaletteBlue;
+
+  /// No description provided for @appearancePaletteEmerald.
+  ///
+  /// In en, this message translates to:
+  /// **'Emerald'**
+  String get appearancePaletteEmerald;
+
+  /// No description provided for @appearancePaletteCoral.
+  ///
+  /// In en, this message translates to:
+  /// **'Coral'**
+  String get appearancePaletteCoral;
+
+  /// No description provided for @appearancePaletteViolet.
+  ///
+  /// In en, this message translates to:
+  /// **'Violet'**
+  String get appearancePaletteViolet;
+
+  /// No description provided for @appearancePaletteAmber.
+  ///
+  /// In en, this message translates to:
+  /// **'Amber'**
+  String get appearancePaletteAmber;
+
+  /// Appearance picker section: the background and container colours.
+  ///
+  /// In en, this message translates to:
+  /// **'Surface'**
+  String get appearanceSurface;
+
+  /// Surface option: pure black at night, warm paper in daylight - the app's original pair.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic'**
+  String get appearanceSurfaceAutomatic;
+
+  /// Surface option: pure black, for OLED panels.
+  ///
+  /// In en, this message translates to:
+  /// **'AMOLED'**
+  String get appearanceSurfaceAmoled;
+
+  /// Surface option: dark blue-grey instead of black.
+  ///
+  /// In en, this message translates to:
+  /// **'Midnight'**
+  String get appearanceSurfaceMidnight;
+
+  /// Surface option: surfaces derived from the chosen palette's scheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard'**
+  String get appearanceSurfaceStandard;
+
+  /// Surface option: warm cream tones in the light theme.
+  ///
+  /// In en, this message translates to:
+  /// **'Paper'**
+  String get appearanceSurfacePaper;
+
+  /// Appearance picker section: an optional gradient painted behind the whole app.
+  ///
+  /// In en, this message translates to:
+  /// **'Ambient backdrop'**
+  String get appearanceBackdrop;
+
+  /// Backdrop option: teal-to-violet gradient.
+  ///
+  /// In en, this message translates to:
+  /// **'Aurora'**
+  String get appearanceBackdropAurora;
+
+  /// Backdrop option: magenta-to-indigo gradient.
+  ///
+  /// In en, this message translates to:
+  /// **'Dusk'**
+  String get appearanceBackdropDusk;
+
+  /// Backdrop option: warm orange-to-red gradient.
+  ///
+  /// In en, this message translates to:
+  /// **'Ember'**
+  String get appearanceBackdropEmber;
+
   /// No description provided for @resetDataDialogTitle.
   ///
   /// In en, this message translates to:

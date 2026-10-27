@@ -21,7 +21,6 @@ import 'package:http/http.dart' as http;
 import '../../../core/domain/entity/multimedia_item.dart';
 import '../../../core/extensions/base_provider.dart';
 import '../../../core/extensions/extension_manager.dart';
-import '../../../core/extensions/providers.dart';
 import '../../../core/storage/history_repository.dart';
 import '../../../core/network/http_defaults.dart';
 import '../../../core/network/probe_answer.dart';

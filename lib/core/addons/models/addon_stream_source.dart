@@ -564,10 +564,15 @@ class AddonStreamSource {
         final availableMbps = seeds * 5.0;
         final velocityRatio = availableMbps / requiredMbps;
 
-        if (velocityRatio >= 3.0) value += 100;      // 3x headroom = instant
-        else if (velocityRatio >= 1.5) value += 60;  // 1.5x = smooth
-        else if (velocityRatio >= 1.0) value += 20;  // barely sustainable
-        else value -= 80;                            // will stall
+        if (velocityRatio >= 3.0) {
+          value += 100; // 3x headroom = instant
+        } else if (velocityRatio >= 1.5) {
+          value += 60; // 1.5x = smooth
+        } else if (velocityRatio >= 1.0) {
+          value += 20; // barely sustainable
+        } else {
+          value -= 80; // will stall
+        }
       }
 
       // Codec efficiency bonus (HEVC/AV1 = smaller file = faster)
@@ -587,10 +592,15 @@ class AddonStreamSource {
     } else {
       // Original quality scoring when debrid IS active
       final quality = qualityScore;
-      if (quality >= 2160) value += 140;
-      else if (quality >= 1440) value += 110;
-      else if (quality >= 1080) value += 85;
-      else if (quality >= 720) value += 45;
+      if (quality >= 2160) {
+        value += 140;
+      } else if (quality >= 1440) {
+        value += 110;
+      } else if (quality >= 1080) {
+        value += 85;
+      } else if (quality >= 720) {
+        value += 45;
+      }
       if (isHdr) value += 12;
       if (isCam) value -= 150;
     }

@@ -263,8 +263,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     // tablet breakpoint like any other big window.
     final isWidescreen = context.isTabletOrLarger;
 
-    final theme = Theme.of(context);
-
     if (isWidescreen) {
       // No backdrop photograph, no stage lighting, no Stack. The screen was
       // a cinema still under four blending gradients and a focus spotlight,

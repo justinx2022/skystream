@@ -507,6 +507,57 @@ class AppLocalizationsBn extends AppLocalizations {
   String get chooseTheme => 'থিম নির্বাচন করুন';
 
   @override
+  String get appearancePalette => 'Palette';
+
+  @override
+  String get appearancePaletteDynamic => 'Dynamic';
+
+  @override
+  String get appearancePaletteBlue => 'Blue';
+
+  @override
+  String get appearancePaletteEmerald => 'Emerald';
+
+  @override
+  String get appearancePaletteCoral => 'Coral';
+
+  @override
+  String get appearancePaletteViolet => 'Violet';
+
+  @override
+  String get appearancePaletteAmber => 'Amber';
+
+  @override
+  String get appearanceSurface => 'Surface';
+
+  @override
+  String get appearanceSurfaceAutomatic => 'Automatic';
+
+  @override
+  String get appearanceSurfaceAmoled => 'AMOLED';
+
+  @override
+  String get appearanceSurfaceMidnight => 'Midnight';
+
+  @override
+  String get appearanceSurfaceStandard => 'Standard';
+
+  @override
+  String get appearanceSurfacePaper => 'Paper';
+
+  @override
+  String get appearanceBackdrop => 'Ambient backdrop';
+
+  @override
+  String get appearanceBackdropAurora => 'Aurora';
+
+  @override
+  String get appearanceBackdropDusk => 'Dusk';
+
+  @override
+  String get appearanceBackdropEmber => 'Ember';
+
+  @override
   String get resetDataDialogTitle => 'তথ্য রিসেট করবেন?';
 
   @override

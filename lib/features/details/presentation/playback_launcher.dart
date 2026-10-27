@@ -9,7 +9,6 @@ import '../../../core/router/app_router.dart';
 import '../../../core/services/external_player_service.dart';
 import '../../../core/extensions/extension_manager.dart';
 import '../../../core/extensions/base_provider.dart';
-import '../../../core/extensions/providers.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
 import 'package:collection/collection.dart';

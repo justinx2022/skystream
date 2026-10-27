@@ -9,12 +9,15 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_js_ng
   flutter_secure_storage_windows
   flutter_volume_controller
+  media_kit_libs_windows_video
+  media_kit_video
   permission_handler_windows
   screen_brightness_windows
   screen_retriever_windows
   share_plus
   url_launcher_windows
   vlc_player
+  volume_controller
   window_manager
 )
 

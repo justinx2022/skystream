@@ -79,15 +79,13 @@ class AddonRepository extends _$AddonRepository {
         try {
           final client = ref.read(addonClientProvider);
           final torrentio = await client.fetchManifest(BuiltInAddons.torrentioUrl);
-          if (torrentio != null) {
-            final next = List<ManagedAddon>.from(state.addons);
-            next.add(ManagedAddon(
-              manifestUrl: BuiltInAddons.torrentioUrl,
-              addedAt: DateTime.now(),
-              manifest: torrentio,
-            ));
-            await _persist(next);
-          }
+          final next = List<ManagedAddon>.from(state.addons);
+          next.add(ManagedAddon(
+            manifestUrl: BuiltInAddons.torrentioUrl,
+            addedAt: DateTime.now(),
+            manifest: torrentio,
+          ));
+          await _persist(next);
         } catch (error) {
           if (kDebugMode) debugPrint('[AddonRepository] could not pre-seed Torrentio: $error');
         }

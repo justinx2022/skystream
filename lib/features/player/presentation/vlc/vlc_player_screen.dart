@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -606,7 +605,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
 
   /// Whether this session ever started the torrent engine, so teardown only
   /// stops something it actually started.
-  bool _startedTorrent = false;
+  final bool _startedTorrent = false;
 
   /// Intro/outro bands for the current episode. Usually empty: both sources
   /// are opt-in and off by default.

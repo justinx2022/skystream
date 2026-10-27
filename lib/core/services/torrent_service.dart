@@ -84,7 +84,7 @@ class TorrentService {
       final token = _server.authToken;
       final headers = {
         'Content-Type': 'application/json',
-        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+        FlutterTorrentServer.authTokenHeader: ?token,
       };
 
       final settings = {
@@ -340,7 +340,7 @@ class TorrentService {
       final token = _server.authToken;
       final headers = {
         'Content-Type': 'application/json',
-        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+        FlutterTorrentServer.authTokenHeader: ?token,
       };
       await http.post(
         Uri.parse("$_serverUrl/torrents"),
@@ -364,7 +364,7 @@ class TorrentService {
       final token = _server.authToken;
       final headers = {
         'Content-Type': 'application/json',
-        if (token != null) FlutterTorrentServer.authTokenHeader: token,
+        FlutterTorrentServer.authTokenHeader: ?token,
       };
       final response = await http.post(
         Uri.parse("$_serverUrl/torrents"),

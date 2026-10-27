@@ -261,7 +261,7 @@ class LanSyncService {
         postReq.headers.contentType = ContentType.json;
         postReq.write(jsonEncode(localHistory));
         final postRes = await postReq.close();
-        await postRes.drain();
+        await postRes.drain<void>();
       }
 
       client.close();

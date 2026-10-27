@@ -970,6 +970,13 @@ class _FakeTorrents implements TorrentService {
       'http://127.0.0.1:9/pack/$index';
 
   @override
+  Future<List<Map<String, dynamic>>> getAllTorrentsStatus() async =>
+      const <Map<String, dynamic>>[];
+
+  @override
+  Future<void> removeTorrent(String hash, {bool drop = true}) async {}
+
+  @override
   Future<void> start() async {}
 
   @override

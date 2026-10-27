@@ -100,7 +100,6 @@ class ProviderHealthRecord {
 class ProviderHealthService {
   static const String _kPrefsKey = 'provider_health_records_v1';
   final Map<String, ProviderHealthRecord> _records = {};
-  bool _loaded = false;
 
   ProviderHealthService() {
     _loadFromStorage();
@@ -122,8 +121,6 @@ class ProviderHealthService {
       }
     } catch (e) {
       if (kDebugMode) debugPrint('ProviderHealthService._loadFromStorage error: $e');
-    } finally {
-      _loaded = true;
     }
   }
 
