@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skystream/core/domain/entity/multimedia_item.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
+import 'package:skystream/core/services/local_proxy_service.dart';
 import 'package:skystream/core/storage/history_repository.dart';
 import 'package:skystream/core/storage/storage_service.dart';
 import 'package:skystream/features/player/presentation/player_platform_service.dart';
@@ -50,6 +51,21 @@ final TargetPlatformVariant _texturePlatform = TargetPlatformVariant.only(
 const String _wakelockToggle =
     'dev.flutter.pigeon.wakelock_plus_platform_interface.WakelockPlusApi.toggle';
 
+/// The screen watches connectivity for the whole of its life and, on a
+/// handset, mirrors the system volume through the volume plugin. Both open a
+/// platform stream that has to be cancelled on dispose, so both need answering
+/// here as well as on the device; see vlc_screen_harness.dart.
+const MethodChannel _connectivity = MethodChannel(
+  'dev.fluttercommunity.plus/connectivity',
+);
+const EventChannel _connectivityStatus = EventChannel(
+  'dev.fluttercommunity.plus/connectivity_status',
+);
+const MethodChannel _volume =
+    MethodChannel('com.yosemiteyss.flutter_volume_controller/method');
+const EventChannel _volumeEvents =
+    EventChannel('com.yosemiteyss.flutter_volume_controller/event');
+
 final ByteData? _wakelockReply = const StandardMessageCodec().encodeMessage(
   <Object?>[null],
 );
@@ -84,6 +100,22 @@ void main() {
       SystemChannels.platform_views,
       (call) async => null,
     );
+    messenger.setMockMethodCallHandler(
+      _connectivity,
+      (call) async => <String>['wifi'],
+    );
+    messenger.setMockStreamHandler(
+      _connectivityStatus,
+      MockStreamHandler.inline(onListen: (arguments, sink) {}),
+    );
+    messenger.setMockMethodCallHandler(_volume, (call) async {
+      if (call.method == 'getVolume') return '1.0';
+      return null;
+    });
+    messenger.setMockStreamHandler(
+      _volumeEvents,
+      MockStreamHandler.inline(onListen: (arguments, sink) {}),
+    );
     messenger.setMockMethodCallHandler(_window, (call) async {
       switch (call.method) {
         case 'isFullScreen':
@@ -97,8 +129,12 @@ void main() {
     });
   });
 
-  tearDown(() {
+  tearDown(() async {
     immersiveRouteActive.value = false;
+    // The HLS URL goes through the local proxy, which binds a real HttpServer
+    // whose two-minute idle timer outlives the widget tree. The service is a
+    // singleton meant to live for the app, not for one test.
+    await LocalProxyService.instance.shutdown();
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(_vlc, null);
@@ -107,6 +143,10 @@ void main() {
     messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
     messenger.setMockMethodCallHandler(_window, null);
     messenger.setMockMethodCallHandler(_pip, null);
+    messenger.setMockMethodCallHandler(_connectivity, null);
+    messenger.setMockStreamHandler(_connectivityStatus, null);
+    messenger.setMockMethodCallHandler(_volume, null);
+    messenger.setMockStreamHandler(_volumeEvents, null);
   });
 
   /// Delivers a window event exactly as the native plugin does: an `onEvent`
@@ -190,6 +230,16 @@ void main() {
       .widget<VlcPlayerControls>(find.byType(VlcPlayerControls))
       .isFullscreen;
 
+  /// Takes the player down and stops the proxy behind it.
+  ///
+  /// The binding checks for stray timers the moment the test body returns,
+  /// which is before [tearDown] runs, and an HLS source leaves the local
+  /// proxy's HttpServer holding a two-minute idle timer.
+  Future<void> closePlayer(WidgetTester tester) async {
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(LocalProxyService.instance.shutdown);
+  }
+
   testWidgets(
     'full screen follows the window, not the button',
     variant: _texturePlatform,
@@ -208,7 +258,7 @@ void main() {
       await emitWindowEvent(tester, kWindowEventLeaveFullScreen);
       expect(controlsSayFullscreen(tester), isFalse);
 
-      await tester.pumpWidget(const SizedBox());
+      await closePlayer(tester);
     },
   );
 
@@ -228,7 +278,7 @@ void main() {
             'enter-full-screen icon',
       );
 
-      await tester.pumpWidget(const SizedBox());
+      await closePlayer(tester);
     },
   );
 
@@ -246,7 +296,7 @@ void main() {
         reason: 'nothing tells the desktop shell to stand its title bar down',
       );
 
-      await tester.pumpWidget(const SizedBox());
+      await closePlayer(tester);
 
       expect(
         immersiveRouteActive.value,
@@ -274,7 +324,7 @@ void main() {
             'Windows and Linux nothing else honours fit at all',
       );
 
-      await tester.pumpWidget(const SizedBox());
+      await closePlayer(tester);
     },
   );
 }

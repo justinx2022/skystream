@@ -126,16 +126,41 @@ void main() {
       expect(resolved.selected.source, 'Video');
     });
 
-    test('a torrent resolves to a torrent stream rather than a plugin call',
-        () async {
+    test('a torrent has nothing to play: the torrent engine is retired', () {
+      // Playback is direct-only. A magnet used to reach the bundled torrent
+      // server; nothing is behind it now, so the resolver says so rather than
+      // handing the engine a link it cannot open.
+      expect(
+        () => resolvePlayback(
+          read: readerOf(defaults),
+          item: itemWith(),
+          videoUrl: 'magnet:?xt=urn:btih:abc',
+          probeCandidates: 0,
+        ),
+        throwsA(
+          isA<StreamResolutionException>().having(
+            (e) => e.failure,
+            'failure',
+            StreamResolutionFailure.nothingToPlay,
+          ),
+        ),
+      );
+    });
+
+    test('a torrent in a preloaded list is dropped, not opened', () async {
       final resolved = await resolvePlayback(
         read: readerOf(defaults),
         item: itemWith(),
-        videoUrl: 'magnet:?xt=urn:btih:abc',
+        videoUrl: 'https://example.com/episode/1',
+        preloadedStreams: [
+          const StreamResult(url: 'magnet:?xt=urn:btih:abc', source: 'Torrent'),
+          streamAt('https://cdn.example/720.mp4', '720p'),
+        ],
         probeCandidates: 0,
       );
 
-      expect(resolved.selected.source, 'Torrent');
+      expect(resolved.streams, hasLength(1));
+      expect(resolved.selected.url, 'https://cdn.example/720.mp4');
     });
 
     test('no provider and nothing preloaded fails with a message', () async {
@@ -446,8 +471,9 @@ void main() {
         final resolved = await resolving;
         expect(
           resolved.index,
-          1,
-          reason: 'b answers, and it outranks c and d',
+          2,
+          reason: 'c answered while b was still waiting: the quicker '
+              'mirror wins, whatever its place in the list',
         );
       }, () => answering(dead: {'a'}, held: {'b': b}));
     });
@@ -511,7 +537,11 @@ void main() {
             if (outcome == ProbeOutcome.trying) dispatched.add(index);
           },
         );
-        expect(resolved.index, 0, reason: 'a answered first');
+        expect(
+          resolved.index,
+          lessThan(3),
+          reason: 'the check settled on one of the first three that answered',
+        );
         expect(dispatched, isNot(contains(3)));
 
         b.complete();

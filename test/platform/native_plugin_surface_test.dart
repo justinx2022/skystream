@@ -73,9 +73,26 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'integration_test',
     'jni',
     'jni_flutter',
+    // The MediaKit engine's render surface. `onAttachedToEngine` builds a
+    // method channel and an `VideoOutputManager` over the texture registry, and
+    // creates no texture until Dart asks for one. The engine's cost is the
+    // player's, not the registrar's.
+    'media_kit_video',
+    // The libmpv payload behind media_kit_video. Its class initialiser calls
+    // `System.loadLibrary("mpv")` and `onAttachedToEngine` stores the
+    // application Context — so a MediaKit session is not what loads 40-odd MB
+    // of libmpv into the process, the registrant is, even when the viewer
+    // opens a link in the libVLC engine instead.
+    'media_kit_libs_android_video',
     'open_file_android',
     'package_info_plus',
     'permission_handler_android',
+    // Transitive, from media_kit_video. Same shape as the flutter_volume_controller
+    // note above: the registrar resolves AudioManager and builds a method and an
+    // event channel; the broadcast receiver and the Settings content observer
+    // attach in `onListen`, which the player only reaches if it talks to this
+    // plugin rather than libVLC's own gain.
+    'volume_controller',
     'screen_brightness_android',
     'share_plus',
     'shared_preferences_android',
@@ -94,6 +111,10 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'flutter_secure_storage_darwin',
     'flutter_torrent_server',
     'integration_test',
+    // See the android note: a channel, a texture registry and a
+    // VideoOutputManager. On iOS the manager's textures are created per video
+    // output, so an unused MediaKit costs the registrar nothing.
+    'media_kit_video',
     'open_file_ios',
     'package_info_plus',
     'permission_handler_apple',
@@ -110,6 +131,10 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'sqflite_darwin',
     'url_launcher_ios',
     'vlc_player',
+    // Transitive, from media_kit_video. `register` wires a method channel, an
+    // event channel and an application/scene delegate; the KVO observation of
+    // `outputVolume` starts in `onListen`, so nothing listens until Dart asks.
+    'volume_controller',
     'wakelock_plus',
   },
   'macos': {
@@ -124,6 +149,13 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'flutter_inappwebview_macos',
     'flutter_js_ng',
     'flutter_secure_storage_darwin',
+    // As on iOS: channels and a texture registry at `register`; the CoreAudio
+    // property listeners only start in `onListen`.
+    'media_kit_video',
+    // Transitive, from media_kit_video. The registrar is the same shape as the
+    // audio-session note at the top of this platform: channels now, CoreAudio
+    // observation in `onListen`.
+    'volume_controller',
     'open_file_mac',
     'package_info_plus',
     // Desktop has no touch rail, so nothing reaches brightness here. Kept only
@@ -147,6 +179,17 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'flutter_js_ng',
     'flutter_secure_storage_linux',
     'jni',
+    // Registration builds a GTK plugin object: method and event channels plus a
+    // VideoOutputManager over the texture registrar. No GL context or mpv
+    // instance until Dart creates an output.
+    'media_kit_video',
+    // Transitive, from media_kit_video, and not the same package as the
+    // flutter_volume_controller above. `register_with_registrar` wires channels
+    // only; the ALSA `AudioController` is built on the first method call, in the
+    // handler, so the rule at the top of this platform still holds. It does
+    // pull `libasound2-dev` into the Linux build — a CI dependency to keep in
+    // mind, not a runtime side effect.
+    'volume_controller',
     'open_file_linux',
     'screen_retriever_linux',
     'url_launcher_linux',
@@ -188,6 +231,18 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'flutter_js_ng',
     'flutter_secure_storage_windows',
     'jni',
+    // The MediaKit render surface, and the only plugin in this file that
+    // subclasses the host window at registration: the constructor calls
+    // `SetWindowLongPtr(GWLP_WNDPROC)` on the top-level Flutter window so the
+    // plugin can marshal work onto the UI thread through a posted message, then
+    // restores the original proc in its destructor. Nothing is written and the
+    // chain is restored, but it is a hook into every window message the app
+    // receives for as long as the plugin lives.
+    'media_kit_video',
+    // The libmpv payload. Its registrar only prints a line; the cost is the
+    // `mpv-2.dll` and codec DLLs CMake copies next to the executable, which
+    // load into the process when MediaKit initialises rather than at startup.
+    'media_kit_libs_windows_video',
     // Dead code on Windows — every Permission.* call site is Platform.isAndroid
     // gated — but its registrar only builds method and event channels, so it is
     // not worth a stub package to remove.
@@ -200,6 +255,17 @@ const Map<String, Set<String>> _expected = <String, Set<String>>{
     'screen_retriever_windows',
     'share_plus',
     'url_launcher_windows',
+    // Transitive, from media_kit_video — and the *second* Windows plugin of this
+    // family, not the same package as flutter_volume_controller above. Its
+    // constructor is heavier than that one: `CoInitializeEx`, a
+    // `MMDeviceEnumerator` instance, a hidden message-only window for device
+    // rebinding, an endpoint-notification callback, and an
+    // `IAudioEndpointVolume` on the default render endpoint — all at
+    // `RegisterWithRegistrar`, held until the plugin is destroyed. Like the
+    // first, it writes nothing until asked; unlike the first, it leaves a
+    // window and a COM registration in place for the session. It exists because
+    // media_kit_video depends on it for the handset volume keys.
+    'volume_controller',
     'vlc_player',
     'window_manager',
   },

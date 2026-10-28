@@ -89,6 +89,25 @@ class _BlockingAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+/// Waits until [count] requests have reached the adapter.
+///
+/// The bridge clears the URL with the SSRF guard first, which resolves the
+/// host over real DNS. That round-trip is wall-clock time on another thread,
+/// so the zero-delay turns [pumpEventQueue] runs all elapse before a request
+/// can be on the wire.
+Future<void> _awaitStarted(_BlockingAdapter adapter, int count) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (adapter.started < count) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail(
+        'only ${adapter.started} of $count requests reached the adapter: '
+        '${adapter.urls}',
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 2));
+  }
+}
+
 /// The message the worker forwards for one `sendMessage(channel, ...)`.
 Map<String, dynamic> _bridgeMsg({
   required int bid,
@@ -372,7 +391,7 @@ void main() {
           },
         ),
       );
-      await pumpEventQueue();
+      await _awaitStarted(adapter, 1);
 
       expect(adapter.started, 1);
       expect(adapter.cancelled, 0);
@@ -426,7 +445,7 @@ void main() {
           },
         ),
       );
-      await pumpEventQueue();
+      await _awaitStarted(adapter, 1);
       expect(adapter.cancelled, 0);
 
       // The plugin calls back without awaiting its own fetch.
@@ -485,7 +504,7 @@ void main() {
           ),
         );
       }
-      await pumpEventQueue();
+      await _awaitStarted(adapter, 2);
       expect(adapter.started, 2);
 
       cancelA.cancel('user moved on');

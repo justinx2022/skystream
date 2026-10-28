@@ -64,6 +64,9 @@ void main() {
         jsonEncode(_stored(same, _manifest('same', 'Cinemeta', '3.0.0'))),
         jsonEncode(_stored(gone, _manifest('gone', 'Dead Addon', '1.0.0'))),
       ],
+      // These tests are about the launch refresh, not first-run seeding. With
+      // the seed already recorded, load() stays off the network entirely.
+      'has_preseeded_torrentio_v1': true,
     });
     final container = ProviderContainer(
       overrides: [addonClientProvider.overrideWithValue(client)],

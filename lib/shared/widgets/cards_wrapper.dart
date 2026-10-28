@@ -309,43 +309,48 @@ class _CardsWrapperState extends State<CardsWrapper>
       child: MouseRegion(
         onEnter: (_) => _onHover(true),
         onExit: (_) => _onHover(false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          onLongPress: widget.onLongPress,
-          child: Builder(
-            builder: (context) {
-              // A border is for whoever is driving the app without a
-              // pointer; a finger that just tapped this card does not need
-              // one drawn around it afterwards.
-              final showFocus = showFocusIndicator(context, _isFocused);
-              final borderRadius =
-                  widget.borderRadius ?? BorderRadius.circular(12);
-              // A plain Container, not an AnimatedContainer: the latter builds
-              // an AnimationController in initState, and a rail holds hundreds
-              // of cards that are never focused at all.
-              final card = Container(
-                decoration: CardFocusAffordance.glow(
-                  borderRadius: borderRadius,
-                  focused: showFocus,
-                ),
-                foregroundDecoration: CardFocusAffordance.ring(
-                  context,
-                  borderRadius: borderRadius,
-                  focused: showFocus,
-                ),
-                child: widget.child,
-              );
-              // Always a [ScaleTransition], even before the controller
-              // exists. Returning the bare card until the first focus or
-              // hover changes the shape of the element tree the moment either
-              // arrives, and that re-inflates everything below it - including
-              // the network image the card is mostly made of. A stopped
-              // animation costs one Transform and no ticker.
-              return ScaleTransition(
-                scale: _scaleAnimation ?? _kNoScale,
-                child: card,
-              );
-            },
+        // No title exists at this level; the child's own text merges into this
+        // node, so only the button role is announced.
+        child: Semantics(
+          button: true,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            child: Builder(
+              builder: (context) {
+                // A border is for whoever is driving the app without a
+                // pointer; a finger that just tapped this card does not need
+                // one drawn around it afterwards.
+                final showFocus = showFocusIndicator(context, _isFocused);
+                final borderRadius =
+                    widget.borderRadius ?? BorderRadius.circular(12);
+                // A plain Container, not an AnimatedContainer: the latter builds
+                // an AnimationController in initState, and a rail holds hundreds
+                // of cards that are never focused at all.
+                final card = Container(
+                  decoration: CardFocusAffordance.glow(
+                    borderRadius: borderRadius,
+                    focused: showFocus,
+                  ),
+                  foregroundDecoration: CardFocusAffordance.ring(
+                    context,
+                    borderRadius: borderRadius,
+                    focused: showFocus,
+                  ),
+                  child: widget.child,
+                );
+                // Always a [ScaleTransition], even before the controller
+                // exists. Returning the bare card until the first focus or
+                // hover changes the shape of the element tree the moment either
+                // arrives, and that re-inflates everything below it - including
+                // the network image the card is mostly made of. A stopped
+                // animation costs one Transform and no ticker.
+                return ScaleTransition(
+                  scale: _scaleAnimation ?? _kNoScale,
+                  child: card,
+                );
+              },
+            ),
           ),
         ),
       ),

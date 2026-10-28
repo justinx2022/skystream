@@ -1886,4 +1886,17 @@ class AppLocalizationsHi extends AppLocalizations {
   String addonManageNoMatch(String query) {
     return 'No installed add-on matches \"$query\".';
   }
+
+  @override
+  String get connect => 'कनेक्ट करें';
+
+  @override
+  String get debridDisableAndDisconnect =>
+      'डेब्रिड अक्षम करें और डिसकनेक्ट करें';
+
+  @override
+  String get debridDisabledAndRemoved => 'डेब्रिड अक्षम और हटा दिया गया';
+
+  @override
+  String get selectBufferDuration => 'बफ़र अवधि चुनें';
 }

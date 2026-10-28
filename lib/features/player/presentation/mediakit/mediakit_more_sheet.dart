@@ -91,7 +91,7 @@ class _MediaKitMoreSheetState extends State<MediaKitMoreSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              PlayerSheetHeader(title: 'More', isTv: widget.isTv),
+              PlayerSheetHeader(title: l10n.options, isTv: widget.isTv),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,

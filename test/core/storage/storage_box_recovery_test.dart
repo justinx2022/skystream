@@ -60,12 +60,11 @@ void main() {
       null,
     );
     await Hive.close();
-    if (dir.existsSync()) dir.deleteSync(recursive: true);
+    await _removeTempDir(dir);
   });
 
   File boxFile(String name) =>
       File('${dir.path}${Platform.pathSeparator}$name.hive');
-
   test('an environmental failure is rethrown and the box file survives',
       () async {
     // The case with real-world frequency. Hive's own crashRecovery defaults to
@@ -240,5 +239,25 @@ void main() {
     expect(prefs.getString(ExtensionsController.seenPluginsKey), seen);
     expect(prefs.containsKey('unrelated_setting'), isFalse);
   });
+}
+
+/// Deletes [dir], giving a box handle Hive closed without awaiting its close a
+/// moment to actually drop.
+///
+/// When the lock cannot be taken, Hive's `_openBox` calls `newBox.close()` and
+/// moves on without awaiting it. On POSIX an open box file can still be
+/// unlinked, so cleanup never notices; on Windows the handle wins the race
+/// against the delete often enough to fail every run, and the test then fails
+/// on cleanup rather than on anything it is asserting.
+Future<void> _removeTempDir(Directory dir) async {
+  for (var attempt = 0; attempt < 20; attempt++) {
+    if (!dir.existsSync()) return;
+    try {
+      dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+  }
 }
 

@@ -6,6 +6,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:collection/collection.dart';
+import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:version/version.dart';
 
@@ -93,7 +94,25 @@ class UpdateService {
         },
       );
 
-      return File(savePath);
+      final file = File(savePath);
+      final digest = asset.digest;
+      const sha256Prefix = 'sha256:';
+      if (digest != null && digest.startsWith(sha256Prefix)) {
+        final expected = digest.substring(sha256Prefix.length).toLowerCase();
+        final actual = (await sha256.bind(file.openRead()).first).toString();
+        if (actual != expected) {
+          if (kDebugMode) {
+            debugPrint(
+              '[UpdateService] Digest mismatch for ${asset.name}: '
+              'expected $expected, got $actual — discarding download',
+            );
+          }
+          await file.delete();
+          return null;
+        }
+      }
+
+      return file;
     } catch (e) {
       if (kDebugMode) debugPrint('Download failed: $e');
       return null;

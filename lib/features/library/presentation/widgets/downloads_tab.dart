@@ -72,7 +72,8 @@ class _DownloadsTabState extends ConsumerState<DownloadsTab>
                 Icon(
                   Icons.download_for_offline_outlined,
                   size: 64,
-                  color: Theme.of(context).dividerColor,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant
+                      .withValues(alpha: 0.6),
                 ),
                 const SizedBox(height: 16),
                 Text(

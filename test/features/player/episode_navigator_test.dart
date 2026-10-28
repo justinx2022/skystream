@@ -194,14 +194,29 @@ void main() {
       );
     });
 
-    test('a film has no previous episode', () {
+    test('a film filed as one episode has no previous episode', () {
+      final single = [ep(1, 1)];
+      expect(
+        previousEpisodeFor(
+          item: show(single, type: MultimediaContentType.movie),
+          current: single.first,
+          videoUrl: '',
+        ),
+        isNull,
+      );
+    });
+
+    // Some catalogues file a series as a movie and hang the episodes off it.
+    // Navigation follows the list in that case - it is what restored Next
+    // Episode for those titles - so the two directions have to agree here.
+    test('a movie carrying several episodes is navigated as a series', () {
       expect(
         previousEpisodeFor(
           item: show(season, type: MultimediaContentType.movie),
           current: season[1],
           videoUrl: '',
-        ),
-        isNull,
+        )?.episode,
+        1,
       );
     });
 

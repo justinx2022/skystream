@@ -53,12 +53,17 @@ void main() {
     String? backdropUrl,
     String? logoUrl,
     String? status = 'Checking links…',
+    bool seamlessMode = false,
   }) => PlayerStartupView(
     title: 'A Film',
     logoUrl: logoUrl,
     backdropUrl: backdropUrl,
     status: status,
     rows: rows,
+    // Seamless playback - the shipped default - hides every detail line and
+    // the list itself, leaving the spinner and the title. These tests pin the
+    // view the viewer gets when that setting is off, or while it is opening.
+    seamlessMode: seamlessMode,
     currentIndex: currentIndex,
     failed: failed,
     isTv: isTv,

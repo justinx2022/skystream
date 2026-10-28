@@ -284,14 +284,15 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
               : null;
 
           unawaited(
-            PlayerRoute(
-              $extra: PlayerRouteExtra(
-                item: item,
-                videoUrl: videoUrl,
-                episode: episode,
-                preloadedStreams: preloaded,
-              ),
-            ).push<void>(context),
+            ref
+                .read(playbackLauncherProvider)
+                .playResolved(
+                  context,
+                  item: item,
+                  videoUrl: videoUrl,
+                  episode: episode,
+                  streams: preloaded ?? const <StreamResult>[],
+                ),
           );
           return;
         }

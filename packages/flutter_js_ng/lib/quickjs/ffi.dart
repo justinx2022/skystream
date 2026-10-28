@@ -126,7 +126,7 @@ abstract base class JSPropertyEnum extends Opaque {}
 
 final DynamicLibrary _qjsLib = Platform.environment['FLUTTER_TEST'] == 'true'
     ? (Platform.isWindows
-        ? DynamicLibrary.open('quickjs_c_bridge.dll')
+        ? _openWindowsTestBridge()
         : Platform.isMacOS
             ? DynamicLibrary.process()
             : DynamicLibrary.open(
@@ -139,6 +139,27 @@ final DynamicLibrary _qjsLib = Platform.environment['FLUTTER_TEST'] == 'true'
             : (Platform.isAndroid
                 ? DynamicLibrary.open('libfastdev_quickjs_runtime.so')
                 : DynamicLibrary.process())));
+
+/// The Windows test bridge, built from this package's own sources.
+///
+/// Windows has no in-process equivalent of the plugin a device loads, so the
+/// suite needs a plain DLL exporting the same C functions. Nothing in a
+/// `flutter test` run builds it - `windows/CMakeLists.txt` produces
+/// `flutter_js_plugin.dll` during an app build, and the C sources here need
+/// only a host compiler. The paths tried, in order:
+///  * `QUICKJS_C_BRIDGE_TEST_PATH`, for a build kept outside the tree;
+///  * `build/quickjs/quickjs_c_bridge.dll`, what `tool/build_test_bridge.sh`
+///    writes, relative to the package root a test run starts in;
+///  * the bare name, for a copy dropped on `PATH` or in the working directory.
+DynamicLibrary _openWindowsTestBridge() {
+  final explicit = Platform.environment['QUICKJS_C_BRIDGE_TEST_PATH'];
+  if (explicit != null && explicit.isNotEmpty) {
+    return DynamicLibrary.open(explicit);
+  }
+  final local = File('build/quickjs/quickjs_c_bridge.dll').absolute;
+  if (local.existsSync()) return DynamicLibrary.open(local.path);
+  return DynamicLibrary.open('quickjs_c_bridge.dll');
+}
 
 /// DLLEXPORT JSValue *jsThrow(JSContext *ctx, JSValue *obj)
 final Pointer<JSValue> Function(

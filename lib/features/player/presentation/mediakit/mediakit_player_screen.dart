@@ -66,7 +66,8 @@ class MediaKitPlayerScreen extends ConsumerStatefulWidget {
   ConsumerState<MediaKitPlayerScreen> createState() => _MediaKitPlayerScreenState();
 }
 
-class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
+class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
+    with WidgetsBindingObserver {
   late final Player _player;
   late final VideoController _videoController;
   late final Future<void> _mpvConfig;
@@ -86,7 +87,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   bool _isBuffering = false;
   bool _isSwitching = false;
   bool _hasPlayedOnce = false;
+  bool _advancing = false;
   String _error = '';
+  String _lastEngineError = '';
   List<StreamResult> _candidates = const [];
   ResolvedPlayback? _resolved;
   int _attemptIndex = 0;
@@ -137,7 +140,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   double _playbackSpeed = 1.0;
   bool _isFullscreen = false;
   BoxFit _fit = BoxFit.contain;
+  PlayerSettings? _settings;
 
+  static BoxFit _fitFromSettings(String mode) => switch (mode.toLowerCase()) {
+        'zoom' => BoxFit.cover,
+        'stretch' => BoxFit.fill,
+        _ => BoxFit.contain,
+      };
+
+  int get _seekStep => _settings?.seekDuration ?? 10;
   /// How this device is driven, derived per build from the device profile -
   /// a television is handed the ten-foot ramp and a wrapped action row, and
   /// everything else the two-line bar a pointer can drag. [unknown] until the
@@ -158,6 +169,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     if (!kIsWeb && Platform.isAndroid) {
       try {
@@ -181,6 +193,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     }
 
     _currentVideoUrl = widget.videoUrl;
+    _settings = ref.read(playerSettingsProvider).asData?.value;
+    _fit = _fitFromSettings(_settings?.defaultResizeMode ?? 'Fit');
     _currentEpisode = widget.episode ??
         _item.episodes?.firstWhereOrNull((e) {
           final u1 = e.url.trim().replaceAll(RegExp(r'/+$'), '');
@@ -189,17 +203,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         });
 
     _player = Player(
-      configuration: const PlayerConfiguration(
+      configuration: PlayerConfiguration(
         title: 'SkyStream',
-        bufferSize: 64 * 1024 * 1024, // 64 MB ring buffer (fast & safe for mobile & desktop)
+        bufferSize:
+            (_settings?.networkBufferMb ?? 64).clamp(16, 512) * 1024 * 1024,
         logLevel: MPVLogLevel.error,
       ),
     );
 
     _videoController = VideoController(
       _player,
-      configuration: const VideoControllerConfiguration(
-        enableHardwareAcceleration: true,
+      configuration: VideoControllerConfiguration(
+        enableHardwareAcceleration: _settings?.hardwareDecoding ?? true,
       ),
     );
 
@@ -213,6 +228,32 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     _listenPlayerStreams();
     _startPlayback();
     _startControlsTimer();
+  }
+
+  /// Android can freeze or kill a backgrounded process at any moment, so the
+  /// last five-second sample is written on the way out rather than on the next
+  /// tick. The tracker session carries on: a viewer who comes back is still
+  /// watching the same episode, and [_recordFinalProgress] is what ends it.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_disposed) return;
+    if (state == AppLifecycleState.resumed) {
+      if (!kIsWeb && Platform.isAndroid) unawaited(WakelockPlus.enable());
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.inactive) {
+      _flushProgress();
+      // `inactive` also means a PiP transition or a permission dialog, so the
+      // screen flag only goes with the app actually leaving the foreground.
+      if ((state == AppLifecycleState.paused ||
+              state == AppLifecycleState.hidden) &&
+          !kIsWeb &&
+          Platform.isAndroid) {
+        unawaited(WakelockPlus.disable());
+      }
+    }
   }
 
   Future<void> _applyMpvOptimizations() async {
@@ -274,6 +315,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
         }
 
+        if (_settings?.hardwareDecoding == false) {
+          await native.setProperty('hwdec', 'no');
+        }
+        // The viewer's network buffer, in the seconds of read-ahead mpv
+        // understands; two minutes is the old hardcoded value.
+        final cacheSeconds =
+            ((_settings?.bufferDurationMinutes ?? 2) * 60).clamp(30, 720);
+        await native.setProperty('cache-secs', '$cacheSeconds');
+        await _applySubtitleStyle(native);
+
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
       } catch (e) {
@@ -281,6 +332,23 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       }
     }
   }
+
+  /// The viewer's subtitle appearance, in mpv's terms: a scale relative to
+  /// mpv's own default rather than libVLC's inverse-relative size.
+  Future<void> _applySubtitleStyle(NativePlayer native) async {
+    final settings = _settings;
+    if (settings == null) return;
+    final scale = (settings.subtitleSize / 22).clamp(0.5, 3.0);
+    await native.setProperty('sub-scale', scale.toStringAsFixed(2));
+    await native.setProperty('sub-color', _mpvColor(Color(settings.subtitleColor)));
+    final background = Color(settings.subtitleBackgroundColor).withValues(
+      alpha: settings.subtitleBackgroundOpacity.clamp(0.0, 1.0),
+    );
+    await native.setProperty('sub-back-color', _mpvColor(background));
+  }
+
+  String _mpvColor(Color color) =>
+      '#${color.toARGB32().toRadixString(16).padLeft(8, '0')}';
 
   Episode? get _effectiveCurrentEpisode {
     if (_currentEpisode != null) return _currentEpisode;
@@ -318,12 +386,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   bool get _hasNextEpisode => _nextEpisode != null;
   bool get _hasPreviousEpisode => _previousEpisode != null;
 
+  /// Moves to the next episode once.
+  ///
+  /// Three things ask for this at the end of an episode - the countdown, the
+  /// completion event and the Next button - and a second advance would skip an
+  /// episode nobody asked to skip. The latch covers the window while the first
+  /// one is stopping the old media.
   Future<void> _advance() async {
+    if (_advancing) return;
     final next = _nextEpisode;
     if (next == null) return;
-    _tracker?.finish();
-    rollForwardHistory(read: ref.read, item: _item, next: next);
-    await _startEpisode(next);
+    _advancing = true;
+    try {
+      _tracker?.finish();
+      rollForwardHistory(read: ref.read, item: _item, next: next);
+      await _startEpisode(next);
+    } finally {
+      _advancing = false;
+    }
   }
 
   Future<void> _startEpisode(Episode next) async {
@@ -333,6 +413,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     );
     _tracker?.finish();
     await _player.stop();
+    // The viewer can leave while the engine is stopping; the fields below are
+    // rebuilt state, and touching them after dispose is a crash.
+    if (_disposed || !mounted) return;
 
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
@@ -401,9 +484,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
 
         final remaining = _duration - pos;
 
-        // Offer Next Episode in the final 35 seconds of the episode
-        if (_hasNextEpisode && !_nextEpisodeDeclined && _duration > const Duration(minutes: 5)) {
-          if (remaining > Duration.zero && remaining <= const Duration(seconds: 35)) {
+        // Offer Next Episode for the same fifteen seconds its countdown shows.
+        // Offering it earlier left the card counting down from fifteen while
+        // twenty seconds of the episode were still to play, so the advance it
+        // took was a skip.
+        if (_hasNextEpisode &&
+            !_nextEpisodeDeclined &&
+            (_settings?.showEpisodes ?? true) &&
+            _duration > const Duration(minutes: 5)) {
+          if (remaining > Duration.zero &&
+              remaining <= const Duration(seconds: 15)) {
             if (_nextEpisodeOffer == null) {
               setState(() => _nextEpisodeOffer = _nextEpisode);
             }
@@ -499,6 +589,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _player.stream.error.listen((err) {
         if (_disposed || !mounted) return;
         if (kDebugMode) debugPrint('[MediaKit] Player Error: $err');
+        // Kept for the health score and the final message: "playback error"
+        // alone says nothing about whether the link 404'd or the decoder
+        // refused the codec.
+        _lastEngineError = err.trim();
         // libmpv reports an error while it rebuilds the demuxer for a track
         // change. Failing over on that is what made track switching reload
         // the whole link.
@@ -538,7 +632,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (_disposed || !mounted) return;
       final state = _player.state;
       if (state.playing) return;
-      _recordProviderHealth(success: false, reason: 'playback error');
+      _recordProviderHealth(
+        success: false,
+        reason: _lastEngineError.isEmpty
+            ? 'playback error'
+            : 'playback error: $_lastEngineError',
+      );
       _failoverNext();
     });
   }
@@ -707,7 +806,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
         setState(() {
           _isLoading = false;
           _isSwitching = false;
-          _error = 'All available sources failed to play.';
+          _error = _lastEngineError.isEmpty
+              ? 'All available sources failed to play.'
+              : 'Playback failed: $_lastEngineError';
         });
       }
       return;
@@ -724,6 +825,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
     final switching = _hasPlayedOnce;
     _attemptIndex = index;
     _errorRecoveryTimer?.cancel();
+    _lastEngineError = '';
     final token = ++_openToken;
 
     if (mounted) {
@@ -825,10 +927,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _error = 'Playback failed. No more available streams.';
+          _error = _lastEngineError.isEmpty
+              ? 'Playback failed. No more available streams.'
+              : 'Playback failed: $_lastEngineError';
         });
       }
     }
+  }
+
+  /// The URL of the stream the engine is on, or null before a stream is
+  /// chosen. The attempt index is advanced by failover and replaced on a retry,
+  /// and a progress sample should never be the thing that indexes past the
+  /// list.
+  String? get _currentStreamUrl {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return null;
+    return streams[_attemptIndex].url;
   }
 
   void _maybeRecordProgress(Duration pos) {
@@ -842,27 +956,27 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           duration: dur,
           token: _token,
         );
-        final streams = _resolved?.streams ?? _candidates;
-        final currentUrl = streams.isNotEmpty ? streams[_attemptIndex].url : null;
-        _recorder?.record(sample, lastStreamUrl: currentUrl);
+        _recorder?.record(sample, lastStreamUrl: _currentStreamUrl);
         _tracker?.onPlaying(sample);
       }
     }
   }
 
-  void _recordFinalProgress() {
+  /// Writes the position now, without ending the session.
+  void _flushProgress() {
     final dur = _duration;
-    if (dur > Duration.zero) {
-      final sample = ProgressSample(
-        position: _position,
-        duration: dur,
-        token: _token,
-      );
-      final streams = _resolved?.streams ?? _candidates;
-      final currentUrl = streams.isNotEmpty ? streams[_attemptIndex].url : null;
-      _recorder?.record(sample, lastStreamUrl: currentUrl, force: true);
-      _tracker?.finish();
-    }
+    if (dur <= Duration.zero) return;
+    _recorder?.record(
+      ProgressSample(position: _position, duration: dur, token: _token),
+      lastStreamUrl: _currentStreamUrl,
+      force: true,
+    );
+  }
+
+  void _recordFinalProgress() {
+    if (_duration <= Duration.zero) return;
+    _flushProgress();
+    _tracker?.finish();
   }
 
   void _startControlsTimer() {
@@ -1352,14 +1466,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
   }
 
   @override
-  void deactivate() {
-    _cleanupPlatformOnExit();
-    super.deactivate();
-  }
-
-  @override
   void dispose() {
     _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _hideControlsTimer?.cancel();
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
@@ -1388,10 +1497,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
       _togglePlayPause();
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-      _seekRelative(10);
+      _seekRelative(_seekStep);
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-      _seekRelative(-10);
+      _seekRelative(-_seekStep);
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.keyF) {
       _toggleFullscreen();
@@ -1440,9 +1549,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                 } else {
                   final screenWidth = MediaQuery.of(context).size.width;
                   if (details.localPosition.dx < screenWidth / 2) {
-                    _seekRelative(-10);
+                    _seekRelative(-_seekStep);
                   } else {
-                    _seekRelative(10);
+                    _seekRelative(_seekStep);
                   }
                 }
               },
@@ -1543,7 +1652,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                   if ((_isLoading || _error.isNotEmpty) && !_isSwitching)
                     PlayerStartupView(
                       title: _item.title,
-                      onPick: (index) => _openCandidate(index),
+                      onPick: (index) =>
+                          _openCandidate(index, startAt: _position),
                       episodeLine: _effectiveCurrentEpisode != null
                           ? (_effectiveCurrentEpisode!.name.isNotEmpty
                               ? (_effectiveCurrentEpisode!.season > 0
@@ -1575,7 +1685,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
                     ),
 
                   // Up Next Episode Countdown Card
-                  if (_nextEpisodeOffer != null && !_nextEpisodeDeclined)
+                  if (_nextEpisodeOffer != null &&
+                      !_nextEpisodeDeclined &&
+                      (_settings?.showEpisodes ?? true))
                     Positioned(
                       bottom: 90,
                       right: 24,
@@ -1783,14 +1895,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           if (!live)
             PlayerIconButton(
               icon: Icons.replay_10_rounded,
-              tooltip: 'Rewind 10s',
+              tooltip: l10n?.playerRewindSeconds(10) ?? 'Rewind 10s',
               isTv: _isTv,
               onPressed: () => _seekRelative(-10),
             ),
           if (!live)
             PlayerIconButton(
               icon: Icons.forward_10_rounded,
-              tooltip: 'Forward 10s',
+              tooltip: l10n?.playerForwardSeconds(10) ?? 'Forward 10s',
               isTv: _isTv,
               onPressed: () => _seekRelative(10),
             ),
@@ -1830,7 +1942,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen> {
           ),
           PlayerIconButton(
             icon: Icons.tune_rounded,
-            tooltip: 'More',
+            tooltip: l10n?.options ?? 'Options',
             isTv: _isTv,
             onPressed: _showMoreSheet,
           ),

@@ -36,6 +36,16 @@ class JsEvalCancelledException implements Exception {
 /// QuickJS. Audit W24.
 const int kJsHttpMaxResponseBytes = 8 * 1024 * 1024;
 
+/// Hard ceiling on the number of requests a single `http_parallel` bridge call
+/// may fan out, so one plugin cannot turn the bridge into a connection flood.
+const int kJsHttpMaxParallelRequests = 32;
+
+/// Ceiling on one plugin storage value, in UTF-8 bytes.
+const int kJsStorageMaxValueBytes = 256 * 1024;
+
+/// Ceiling on one plugin storage key, in characters.
+const int kJsStorageMaxKeyChars = 512;
+
 /// Thrown by [fetchCappedPlainBody] when a plugin's HTTP response exceeds
 /// [kJsHttpMaxResponseBytes]. Surfaces to the plugin through the normal
 /// bridge error path, the same as a connection failure.
@@ -134,6 +144,67 @@ Future<CappedHttpResponse> fetchCappedPlainBody(
     headers: response.headers,
     realUri: response.realUri,
   );
+}
+
+/// True when the bridge may fetch [url]: `http`/`https` only, and neither the
+/// literal host nor any address it resolves to is this device or its network.
+///
+/// Plugin JS is untrusted, and a request it can make is a probe of whatever
+/// the phone or TV box can reach: loopback admin sockets, the router, other
+/// LAN hosts.
+Future<bool> _isAllowedPluginUrl(String url) async {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) return false;
+  if (uri.scheme != 'http' && uri.scheme != 'https') return false;
+
+  var host = uri.host.toLowerCase();
+  if (host.startsWith('[') && host.endsWith(']')) {
+    host = host.substring(1, host.length - 1);
+  }
+  if (host.isEmpty || host == 'localhost' || host.endsWith('.localhost')) {
+    return false;
+  }
+
+  final literal = io.InternetAddress.tryParse(host);
+  if (literal != null) return !_isBlockedAddress(literal);
+
+  try {
+    final resolved = await io.InternetAddress.lookup(host);
+    return !resolved.any(_isBlockedAddress);
+  } on io.SocketException {
+    // Unresolvable: let the request itself report the failure.
+    return true;
+  }
+}
+
+bool _isBlockedIPv4(List<int> raw) {
+  return raw[0] == 0 ||
+      raw[0] == 10 ||
+      raw[0] == 127 ||
+      (raw[0] == 169 && raw[1] == 254) ||
+      (raw[0] == 172 && raw[1] >= 16 && raw[1] <= 31) ||
+      (raw[0] == 192 && raw[1] == 168) ||
+      (raw[0] == 100 && raw[1] >= 64 && raw[1] <= 127);
+}
+
+bool _isBlockedAddress(io.InternetAddress address) {
+  final raw = address.rawAddress;
+  if (address.type == io.InternetAddressType.IPv4 && raw.length == 4) {
+    return _isBlockedIPv4(raw);
+  }
+  if (address.type != io.InternetAddressType.IPv6 || raw.length != 16) {
+    return false;
+  }
+  // An IPv4-mapped address reaches the same host as its IPv4 form.
+  if (raw[10] == 0xff &&
+      raw[11] == 0xff &&
+      raw.take(10).every((b) => b == 0)) {
+    return _isBlockedIPv4(raw.sublist(12));
+  }
+  // ::, ::1, fc00::/7 unique-local, fe80::/10 link-local.
+  return (raw.take(15).every((b) => b == 0) && raw[15] <= 1) ||
+      (raw[0] & 0xfe) == 0xfc ||
+      (raw[0] == 0xfe && (raw[1] & 0xc0) == 0x80);
 }
 
 class JsPluginException implements Exception {
@@ -421,6 +492,18 @@ class JsEngineService {
       case 'http_parallel':
         final requests = (parsed['requests'] as List)
             .cast<Map<String, dynamic>>();
+        if (requests.length > kJsHttpMaxParallelRequests) {
+          if (jsId != null) {
+            _reply(
+              bid,
+              jsId,
+              'http_parallel: at most $kJsHttpMaxParallelRequests requests '
+              'per call',
+              isError: true,
+            );
+          }
+          return;
+        }
         final scope = caller?.rawNamespace;
         final reqToken = _acquireHttpToken(scope);
 
@@ -482,6 +565,22 @@ class JsEngineService {
           num() || bool() => '$rawValue',
           _ => jsonEncode(rawValue),
         };
+        if (key.length > kJsStorageMaxKeyChars ||
+            (value != null &&
+                utf8.encode(value).length > kJsStorageMaxValueBytes)) {
+          talker.error(
+            '[bridge] set_storage rejected: key or value over the size limit',
+          );
+          if (jsId != null) {
+            _reply(
+              bid,
+              jsId,
+              'set_storage: key or value too large',
+              isError: true,
+            );
+          }
+          return;
+        }
         _storage
             .setExtensionData('${caller.storageNamespace}::$key', value)
             .ignore();
@@ -526,7 +625,16 @@ class JsEngineService {
         _storage.setExtensionData('${caller.packageName}:$key', value).ignore();
 
       case 'solve_captcha':
-        if (jsId != null) _reply(bid, jsId, 'mock_captcha_token');
+        // No solver ships with the app; fail the call so a plugin treats the
+        // captcha as unsolved instead of being handed a token that is a lie.
+        if (jsId != null) {
+          _reply(
+            bid,
+            jsId,
+            'solve_captcha: captcha solving is unavailable on this build',
+            isError: true,
+          );
+        }
     }
   }
 
@@ -572,6 +680,17 @@ class JsEngineService {
       final url = req['url'] as String;
       final rawHeaders = req['headers'];
       final body = req['body'];
+
+      if (!await _isAllowedPluginUrl(url)) {
+        talker.error('[JS HTTP] Blocked non-public URL ($requestId): $url');
+        return {
+          'code': 0,
+          'statusCode': 0,
+          'status': 0,
+          'body': '',
+          'error': 'blocked: only public http(s) URLs may be requested',
+        };
+      }
 
       final headers = rawHeaders != null
           ? Map<String, dynamic>.from(rawHeaders as Map)

@@ -231,7 +231,13 @@ void main() {
         reason: 'a silent start failure is unsupportable; log was:\n$log',
       );
       expect(log, contains('a.mp4'));
-      expect(log, contains('FileSystemException'));
+      // The cause, not just the location. Windows reports this exact case as
+      // PathExistsException, a FileSystemException subclass, so the type is
+      // checked rather than the text.
+      final TalkerData logged = talker.history.lastWhere(
+        (TalkerData e) => (e.message ?? '').contains('startDownload failed'),
+      );
+      expect(logged.exception, isA<FileSystemException>());
     });
 
     test('a successful start logs nothing', () async {

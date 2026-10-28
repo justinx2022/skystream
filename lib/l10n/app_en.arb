@@ -1334,6 +1334,22 @@
         "example": "torrentio"
       }
     }
+  },
+  "connect": "Connect",
+  "@connect": {
+    "description": "Button that stores a debrid account key and starts resolving links through it."
+  },
+  "debridDisableAndDisconnect": "Disable & Disconnect Debrid",
+  "@debridDisableAndDisconnect": {
+    "description": "Button that clears the stored debrid key. An ampersand, not a sentence; keep it under about 30 characters."
+  },
+  "debridDisabledAndRemoved": "Debrid disabled and removed",
+  "@debridDisabledAndRemoved": {
+    "description": "Confirmation snackbar after the debrid key is cleared."
+  },
+  "selectBufferDuration": "Select Buffer Duration",
+  "@selectBufferDuration": {
+    "description": "Title of the dialog that picks how many minutes the player buffers ahead."
   }
 }
 

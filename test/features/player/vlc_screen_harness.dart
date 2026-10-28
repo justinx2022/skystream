@@ -36,6 +36,7 @@ import 'package:skystream/core/storage/history_repository.dart';
 import 'package:skystream/core/storage/settings_repository.dart';
 import 'package:skystream/core/storage/storage_service.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
+import 'package:skystream/core/services/local_proxy_service.dart';
 import 'package:skystream/features/library/presentation/history_provider.dart';
 import 'package:skystream/features/player/presentation/vlc/side_car_fetch.dart';
 import 'package:skystream/features/player/presentation/vlc/vlc_player_screen.dart';
@@ -69,6 +70,17 @@ const MethodChannel connectivityChannel = MethodChannel(
 );
 const EventChannel connectivityStatus = EventChannel(
   'dev.fluttercommunity.plus/connectivity_status',
+);
+
+/// The player mirrors the handset's media volume, so the plugin opens a
+/// platform listener while the controls are up and cancels it on the way out.
+/// An unanswered cancel surfaces as a MissingPluginException inside teardown,
+/// attributed to whichever test is running by then rather than to the player.
+const MethodChannel volumeControllerChannel = MethodChannel(
+  'com.yosemiteyss.flutter_volume_controller/method',
+);
+const EventChannel volumeControllerEvents = EventChannel(
+  'com.yosemiteyss.flutter_volume_controller/event',
 );
 
 /// Answered because the wakelock is taken from unawaited futures - see
@@ -246,6 +258,14 @@ void installEngineMocks({FakeVlcEngine? engine}) {
     connectivityStatus,
     MockStreamHandler.inline(onListen: (arguments, sink) {}),
   );
+  messenger.setMockMethodCallHandler(volumeControllerChannel, (call) async {
+    if (call.method == 'getVolume') return '1.0';
+    return null;
+  });
+  messenger.setMockStreamHandler(
+    volumeControllerEvents,
+    MockStreamHandler.inline(onListen: (arguments, sink) {}),
+  );
 }
 
 void removeEngineMocks() {
@@ -257,6 +277,8 @@ void removeEngineMocks() {
   messenger.setMockMethodCallHandler(pipChannel, null);
   messenger.setMockMethodCallHandler(connectivityChannel, null);
   messenger.setMockStreamHandler(connectivityStatus, null);
+  messenger.setMockMethodCallHandler(volumeControllerChannel, null);
+  messenger.setMockStreamHandler(volumeControllerEvents, null);
 }
 
 /// The overlay's spinner never stops, so `pumpAndSettle` cannot be used once
@@ -266,6 +288,20 @@ Future<void> settle(WidgetTester tester) async {
   for (var i = 0; i < 12; i++) {
     await tester.pump(const Duration(milliseconds: 50));
   }
+}
+
+/// Unmounts the player and stops the local proxy behind it.
+///
+/// An HLS source is routed through [LocalProxyService] - a real HttpServer,
+/// with a two-minute idle timer - whenever the speed booster is on, which is
+/// the shipped default. The service is a singleton built to outlive one
+/// player, so nothing in the screen closes it on the way out, and
+/// flutter_test's pending-timer check runs before `addTearDown`. Every test in
+/// a file that opens an HLS source ends here, not in a teardown, or the second
+/// such test in the file is the one that reports the timer.
+Future<void> stopPlayer(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox());
+  await tester.runAsync(LocalProxyService.instance.shutdown);
 }
 
 /// One native snapshot, shaped the way the engine sends it.
@@ -351,7 +387,10 @@ Future<void> pumpPlayer(
   bool pushed = false,
   List<Override> overrides = const <Override>[],
   DeviceProfile? profile,
-  PlayerSettings settings = const PlayerSettings(),
+  // The detailed startup view: these tests pin the status line, the source
+  // list and what its rows say, all of which Seamless Playback - the shipped
+  // default - hides. A test about that mode passes its own [settings].
+  PlayerSettings settings = const PlayerSettings(seamlessPlayback: false),
   Size panelPhysicalSize = tvSize,
   double panelDevicePixelRatio = 1,
 }) async {

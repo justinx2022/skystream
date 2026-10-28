@@ -65,7 +65,6 @@ class PlayerStartupView extends StatefulWidget {
     this.currentIndex,
     this.failed = false,
     this.onRetry,
-    this.onSkipSource,
     this.onDiveIn,
     this.onDoubleClick,
     this.isTv = false,
@@ -111,7 +110,6 @@ class PlayerStartupView extends StatefulWidget {
   final ValueChanged<int> onPick;
   final VoidCallback onBack;
   final VoidCallback? onRetry;
-  final VoidCallback? onSkipSource;
   final VoidCallback? onDiveIn;
 
   /// Toggles full screen. Null where there is no window to full-screen.
@@ -172,7 +170,11 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
     final l10n = AppLocalizations.of(context)!;
     final size = MediaQuery.sizeOf(context);
     final backdrop = widget.backdropUrl;
-    final showBackdrop = backdrop != null && backdrop.isNotEmpty;
+    // A phone skips the artwork: a full-width decode on the form factor with
+    // the least memory and the slowest link, for a layer that is up only for
+    // the second before the picture opens.
+    final showBackdrop =
+        backdrop != null && backdrop.isNotEmpty && size.width >= 600;
 
     return Stack(
       fit: StackFit.expand,
@@ -262,8 +264,6 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
     final reason = widget.reason;
     final hasDiveIn =
         widget.stremioTheme && !widget.failed && widget.onDiveIn != null;
-    final hasSkip =
-        !widget.failed && attempt != null && widget.onSkipSource != null;
 
     final showDetails = !widget.seamlessMode || widget.failed;
 
@@ -418,49 +418,26 @@ class _PlayerStartupViewState extends State<PlayerStartupView>
             ],
           ),
         ),
-        if (showDetails && (hasDiveIn || hasSkip)) ...[
+        // The rows are the control: every source is on screen, and tapping
+        // one is what moves the open on. A Skip chip beside them was a second
+        // way to say the same thing, and only one of the two said which
+        // source it meant.
+        if (showDetails && hasDiveIn) ...[
           const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 12,
-            runSpacing: 10,
-            children: [
-              if (hasDiveIn)
-                CustomButton(
-                  isPrimary: true,
-                  onPressed: widget.onDiveIn,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow_rounded, size: 20),
-                        SizedBox(width: 6),
-                        Text('Dive In'),
-                      ],
-                    ),
-                  ),
-                ),
-              if (hasSkip)
-                CustomButton(
-                  isPrimary: !hasDiveIn,
-                  onPressed: widget.onSkipSource,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.skip_next_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(l10n.playerSkipSource),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
+          CustomButton(
+            isPrimary: true,
+            onPressed: widget.onDiveIn,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.play_arrow_rounded, size: 20),
+                  const SizedBox(width: 6),
+                  Text(l10n.playNow),
+                ],
+              ),
+            ),
           ),
         ],
         if (widget.failed && widget.onRetry != null) ...[

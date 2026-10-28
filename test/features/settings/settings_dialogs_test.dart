@@ -10,6 +10,8 @@ import 'package:skystream/core/network/doh_service.dart';
 import 'package:skystream/core/storage/settings_repository.dart';
 import 'package:skystream/core/storage/storage_service.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
+import 'package:skystream/core/theme/theme_presets.dart';
+import 'package:skystream/core/theme/theme_provider.dart';
 import 'package:skystream/features/player/presentation/player_platform_service.dart';
 import 'package:skystream/features/settings/presentation/player_settings_provider.dart';
 import 'package:skystream/features/settings/presentation/widgets/settings_dialogs.dart';
@@ -57,6 +59,16 @@ class _StubDoh extends DohSettingsNotifier {
   Future<DohSettings> build() async => _value;
 }
 
+/// Keeps the theme dialog off the on-disk settings repository.
+///
+/// The dialog's appearance sections read the palette/surface/backdrop choices,
+/// which are stored preferences; without this the provider is in an error
+/// state under test and the rows never build.
+class _StubThemeCustomization extends ThemeCustomizationController {
+  @override
+  ThemeCustomization build() => const ThemeCustomization();
+}
+
 /// Pumps a single button that opens [open] with a real [WidgetRef].
 Future<void> _pumpOpener(
   WidgetTester tester, {
@@ -71,6 +83,9 @@ Future<void> _pumpOpener(
         deviceProfileProvider.overrideWithValue(AsyncValue.data(profile)),
         playerSettingsProvider.overrideWith(
           settings ?? _StubPlayerSettings.new,
+        ),
+        themeCustomizationProvider.overrideWith(
+          _StubThemeCustomization.new,
         ),
       ],
       child: MaterialApp(

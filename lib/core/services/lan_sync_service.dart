@@ -66,6 +66,11 @@ class LanSyncService {
   Timer? _broadcastTimer;
   bool _started = false;
 
+  /// `ip:port` of peers a sync is currently running against. Pings arrive as
+  /// often as every broadcast, and two overlapping syncs would echo each
+  /// other's history back and forth.
+  final Set<String> _inFlightPeers = <String>{};
+
   /// Whether local network sync is enabled. Controlled via Settings.
   bool enabled = true;
 
@@ -240,12 +245,15 @@ class LanSyncService {
   }
 
   Future<void> _syncWithPeer(String ip, int port) async {
+    final peerKey = '$ip:$port';
+    if (!_inFlightPeers.add(peerKey)) return;
+    HttpClient? client;
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
 
       // 1. Fetch remote history from peer
       final getReq = await client.getUrl(Uri.parse('http://$ip:$port/api/sync/history'));
-      final getRes = await getReq.close();
+      final getRes = await getReq.close().timeout(const Duration(seconds: 8));
       if (getRes.statusCode == HttpStatus.ok) {
         final body = await _readBounded(getRes);
         final dynamic list = body == null ? null : jsonDecode(utf8.decode(body));
@@ -260,13 +268,14 @@ class LanSyncService {
         final postReq = await client.postUrl(Uri.parse('http://$ip:$port/api/sync/push'));
         postReq.headers.contentType = ContentType.json;
         postReq.write(jsonEncode(localHistory));
-        final postRes = await postReq.close();
+        final postRes = await postReq.close().timeout(const Duration(seconds: 8));
         await postRes.drain<void>();
       }
-
-      client.close();
     } catch (e) {
       if (kDebugMode) debugPrint('[LAN-SYNC] Peer sync error with $ip:$port: $e');
+    } finally {
+      client?.close();
+      _inFlightPeers.remove(peerKey);
     }
   }
 

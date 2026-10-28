@@ -63,22 +63,85 @@ jobs:
           }
           JSON_EOF
 
-      - name: Build Universal Release APK
-        run: flutter build apk --release --dart-define-from-file=dart-defines.json
+      # android/app/build.gradle.kts falls back to the *debug* signing config
+      # when rootProject.file("key.properties") is absent, and only prints a
+      # warning. A missing secret must therefore fail the job here instead of
+      # shipping a debug-signed APK.
+      #
+      # Paths, as build.gradle.kts expects them:
+      #   key.properties -> android/key.properties (rootProject = android/)
+      #   storeFile      -> resolved by file() inside the android/app project,
+      #                     so the bare name points at android/app/key.jks.
+      - name: Decode Keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is empty. Refusing to build a release APK that Gradle would debug-sign."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/key.jks
+          test -s android/app/key.jks || { echo "::error::decoded keystore is empty"; exit 1; }
+          cat > android/key.properties << PROPERTIES
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=key.jks
+          PROPERTIES
+          chmod 600 android/key.properties android/app/key.jks
+
+      # Split per ABI, obfuscated, with the mapping kept for crash symbolication.
+      - name: Build Release APKs (per ABI)
+        run: >-
+          flutter build apk --release --split-per-abi
+          --obfuscate --split-debug-info=build/symbols
+          --build-number=${{ github.run_number }}
+          --dart-define-from-file=dart-defines.json
 
       - name: Prepare APK Output
         run: |
+          set -euo pipefail
           mkdir -p release-apks
-          cp build/app/outputs/flutter-apk/app-release.apk release-apks/skystream-android-universal.apk
+          shopt -s nullglob
+          apks=(build/app/outputs/flutter-apk/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::no APKs found in build/app/outputs/flutter-apk"
+            exit 1
+          fi
+          # basename keeps Flutter's app-<abi>-release.apk naming intact.
+          for apk in "${apks[@]}"; do
+            cp "$apk" "release-apks/$(basename "$apk")"
+          done
           ls -lh release-apks/
+          sha256sum release-apks/*.apk | tee release-apks/SHA256SUMS
+
+      - name: Upload Symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-symbols-${{ github.run_number }}
+          path: build/symbols
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Remove Keystore
+        if: always()
+        shell: bash
+        run: rm -f android/app/key.jks android/key.properties
 
       - name: Publish to GitHub Releases
         uses: ncipollo/release-action@v1
         with:
           tag: "android-latest"
           name: "SkyStream Android Latest Release"
-          body: "Universal Release APK for Android smartphones, tablets, Android TV, and Fire TV with 2m-90m buffering and auto provider health failover."
+          body: "Per-ABI Release APKs (arm64-v8a, armeabi-v7a, x86_64) for Android smartphones, tablets, Android TV, and Fire TV with 2m-90m buffering and auto provider health failover. SHA256SUMS is included."
           allowUpdates: true
           replacesArtifacts: true
-          artifacts: "release-apks/skystream-android-universal.apk"
+          artifacts: |
+            release-apks/*.apk
+            release-apks/SHA256SUMS
           token: ${{ secrets.GITHUB_TOKEN }}

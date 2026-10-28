@@ -72,6 +72,8 @@ void main() {
       );
       expect(find.text('0:02 / 49:37'), findsOneWidget);
       expect(web.asked, hasLength(2), reason: 'measured once per attempt');
+
+      await stopPlayer(tester);
     },
   );
 
@@ -119,6 +121,8 @@ void main() {
         hasLength(1),
         reason: 'the ending was taken for a failure and the source reopened',
       );
+
+      await stopPlayer(tester);
     },
   );
 

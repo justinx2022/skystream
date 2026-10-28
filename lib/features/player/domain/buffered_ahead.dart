@@ -271,7 +271,18 @@ class BufferedAheadEstimator {
 
     final consumed = demuxReadBytes - previous;
     final seconds = interval.inMicroseconds / 1e6;
-    if (consumed < 0 || seconds <= 0) return null;
+    if (consumed < 0 || seconds <= 0) {
+      if (consumed < 0) {
+        // The counters restarted under us. The rate and the stranded total
+        // both describe the old ones, so neither is applied to the new set:
+        // the gap between two unrelated counters is not a buffer, and the
+        // band stays blank until two readings of the new set agree.
+        _steadyRate = null;
+        _stranded = 0;
+        _pendingSkip = null;
+      }
+      return null;
+    }
 
     double? rate;
     if (consumed > 0) {
@@ -313,6 +324,13 @@ class BufferedAheadEstimator {
     final ahead = held / rate;
     if (!ahead.isFinite) return null;
     final result = Duration(microseconds: (ahead * 1e6).round());
-    return result > kMaxReportableBufferedAhead ? null : result;
+    // A capacity bounds the bytes this can be computed from, so a long answer
+    // is a slow stream honestly filling a big window - the shipped 512 MB at
+    // 4 Mbit/s is seventeen minutes - rather than the runaway total the cap
+    // above exists to catch. Only an unbounded gap is refused for its size.
+    if (capacityBytes == null && result > kMaxReportableBufferedAhead) {
+      return null;
+    }
+    return result;
   }
 }

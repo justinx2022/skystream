@@ -41,6 +41,7 @@ jobs:
   version:
     name: Get Version
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
@@ -58,6 +59,7 @@ jobs:
     name: Create Release
     needs: version
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - name: Create Release
@@ -74,6 +76,7 @@ jobs:
     needs: [version, create_release]
     if: ${{ github.event.inputs.build_android == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -184,6 +187,7 @@ jobs:
     needs: [version, create_release]
     if: ${{ github.event.inputs.build_ios == 'true' }}
     runs-on: macos-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - name: Select Latest Xcode
@@ -254,6 +258,7 @@ jobs:
     needs: [version, create_release]
     if: ${{ github.event.inputs.build_macos == 'true' }}
     runs-on: macos-latest
+    timeout-minutes: 90
     strategy:
       # One arch failing must never cancel the other. Without this, GitHub's
       # default fail-fast: true cancels the in-flight sibling leg, so a broken
@@ -395,6 +400,7 @@ jobs:
     needs: [version, create_release]
     if: ${{ github.event.inputs.build_windows == 'true' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       # One arch failing must never cancel the other. Without this, GitHub's
       # default fail-fast: true cancels the in-flight sibling leg, so a broken
@@ -502,6 +508,7 @@ jobs:
     needs: [version, create_release]
     if: ${{ github.event.inputs.build_linux == 'true' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       # One arch failing must never cancel the other. Without this, GitHub's
       # default fail-fast: true cancels the in-flight sibling leg, so a broken

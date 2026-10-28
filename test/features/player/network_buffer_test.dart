@@ -111,11 +111,11 @@ void main() {
       expect(standard, lessThan(high));
       expect(
         high,
-        512,
+        2048,
         reason:
             'anything with memory to spare, which is every desktop and any '
-            'handset reporting 6 GB or more - the tier is a RAM verdict, not '
-            'a platform one',
+            'handset reporting 6 GB or more, starts with 2 GB of read-ahead - '
+            'the tier is a RAM verdict, not a platform one',
       );
     });
 
@@ -220,9 +220,15 @@ void _torrentSplitTests() {
           greaterThan(0),
           reason: '$cacheMb MB kept nothing behind the read point',
         );
+        // The split is a whole percent, so on the one cache large enough for
+        // a single percent to overshoot the cap, one percent is the tightest
+        // the window can be expressed and the cap gives.
+        final cap = cacheMb ~/ 100 > kMaxTorrentBehindMb
+            ? cacheMb / 100
+            : kMaxTorrentBehindMb.toDouble();
         expect(
           behind,
-          lessThanOrEqualTo(kMaxTorrentBehindMb.toDouble()),
+          lessThanOrEqualTo(cap),
           reason: 'the behind window is capped; the rest is what plays',
         );
       }

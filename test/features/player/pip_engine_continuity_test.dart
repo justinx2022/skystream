@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skystream/core/domain/entity/multimedia_item.dart';
+import 'package:skystream/core/services/local_proxy_service.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
 import 'package:skystream/core/storage/history_repository.dart';
 import 'package:skystream/core/storage/storage_service.dart';
@@ -56,6 +57,21 @@ final ByteData? _wakelockReply = const StandardMessageCodec().encodeMessage(
   <Object?>[null],
 );
 
+/// The screen watches connectivity for the whole of its life and, on a
+/// handset, mirrors the system volume through the volume plugin. Both open a
+/// platform stream that has to be cancelled on dispose, so both need answering
+/// here as well as on the device; see vlc_screen_harness.dart.
+const MethodChannel _connectivity = MethodChannel(
+  'dev.fluttercommunity.plus/connectivity',
+);
+const EventChannel _connectivityStatus = EventChannel(
+  'dev.fluttercommunity.plus/connectivity_status',
+);
+const MethodChannel _volume =
+    MethodChannel('com.yosemiteyss.flutter_volume_controller/method');
+const EventChannel _volumeEvents =
+    EventChannel('com.yosemiteyss.flutter_volume_controller/event');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -83,6 +99,22 @@ void main() {
       SystemChannels.platform_views,
       (call) async => null,
     );
+    messenger.setMockMethodCallHandler(
+      _connectivity,
+      (call) async => <String>['wifi'],
+    );
+    messenger.setMockStreamHandler(
+      _connectivityStatus,
+      MockStreamHandler.inline(onListen: (arguments, sink) {}),
+    );
+    messenger.setMockMethodCallHandler(_volume, (call) async {
+      if (call.method == 'getVolume') return '1.0';
+      return null;
+    });
+    messenger.setMockStreamHandler(
+      _volumeEvents,
+      MockStreamHandler.inline(onListen: (arguments, sink) {}),
+    );
   });
 
   tearDown(() {
@@ -94,6 +126,10 @@ void main() {
     messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
     // The screen registers this one itself; leaving it set outlives the State.
     messenger.setMockMethodCallHandler(_pip, null);
+    messenger.setMockMethodCallHandler(_connectivity, null);
+    messenger.setMockStreamHandler(_connectivityStatus, null);
+    messenger.setMockMethodCallHandler(_volume, null);
+    messenger.setMockStreamHandler(_volumeEvents, null);
   });
 
   /// Tells the screen the activity has entered or left PiP, over the same
@@ -201,6 +237,10 @@ void main() {
       expect(find.byType(VlcPlayerControls), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
+      // The HLS source was routed through the local proxy, whose HttpServer
+      // holds a two-minute idle timer. flutter_test checks for pending timers
+      // the moment the test body returns, which is before any teardown runs.
+      await tester.runAsync(LocalProxyService.instance.shutdown);
     },
   );
 }

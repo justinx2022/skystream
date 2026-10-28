@@ -62,7 +62,9 @@ class TmdbDetailsStatsSection extends StatelessWidget {
                   ? () {
                       final parsed = DateTime.tryParse(releaseDateFull);
                       if (parsed != null) {
-                        return DateFormat('MMMM d, yyyy').format(parsed);
+                        return DateFormat.yMMMMd(
+                          Localizations.localeOf(context).toString(),
+                        ).format(parsed);
                       }
                       return releaseDateFull;
                     }()

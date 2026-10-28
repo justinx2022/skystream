@@ -1304,8 +1304,13 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     // producing a frame, not on getting to setMedia.
     _handedToEngine = true;
     _startAttemptClock();
-    if (!_isLive && looksLikeHls(mediaUri)) {
-      _hlsMedia = (uri: mediaUri, headers: headers);
+    if (!_isLive && looksLikeHls(uri)) {
+      // The source's own playlist, not the copy handed to the engine: that one
+      // may be the local proxy's rewritten URL - every segment in it already a
+      // proxy link - or the decrypting proxy's pseudo-manifest, which has no
+      // segment list to measure at all. Reading the source costs one plain GET
+      // of a text file and answers with the same numbers.
+      _hlsMedia = (uri: uri, headers: headers);
     }
 
     // The source's subtitle files are read and drawn by SkyStream rather than
@@ -2230,18 +2235,11 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     );
     if (fraction != null) {
       _bufferedFraction.value = fraction;
-    } else if (value.duration > Duration.zero) {
-      // Retain the current buffer fraction during momentary sampling pauses,
-      // clamped so it never lags behind the playhead.
-      final playheadFraction =
-          (position.inMicroseconds / value.duration.inMicroseconds).clamp(
-            0.0,
-            1.0,
-          );
-      if (_bufferedFraction.value < playheadFraction) {
-        _bufferedFraction.value = playheadFraction;
-      }
     } else {
+      // Null is the estimator saying it does not know: no rate yet, a counter
+      // that restarted, or a demuxer that has stopped consuming. Holding the
+      // last width, or stretching it to the playhead, would shade the whole
+      // played region as fetched on a stream that is not being fetched at all.
       _bufferedFraction.value = 0;
     }
   }
@@ -4295,9 +4293,6 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       currentIndex: current,
       failed: failed,
       onPick: _pickFromStartup,
-      onSkipSource: hasCurrent && (current + 1) < sources.length
-          ? () => _pickFromStartup(current + 1)
-          : null,
       onDiveIn: !failed && sources.isNotEmpty ? _diveInNow : null,
       onBack: _handleBack,
       onRetry: _retry,

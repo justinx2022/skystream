@@ -73,6 +73,43 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Brings [target] on screen.
+  ///
+  /// The page is a single plain `ListView`, which builds only the rows inside
+  /// the viewport. Anything below the fold simply is not in the tree, so a
+  /// bare finder cannot see it however small the window is.
+  Future<void> scrollTo(WidgetTester tester, Finder target) async {
+    await tester.scrollUntilVisible(
+      target,
+      150,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+  }
+
+  /// Checks [titles] are nowhere on the page, not merely off screen.
+  ///
+  /// Walks the list to its end, checking at every step, so a row that exists
+  /// halfway down is still found - unlike a single finder at the top, which
+  /// would pass whether the gate works or the row is just below the fold.
+  Future<void> expectAbsentThroughout(
+    WidgetTester tester,
+    List<String> titles, {
+    String? reason,
+  }) async {
+    final Finder list = find.byType(Scrollable).first;
+    for (var step = 0; step < 40; step++) {
+      for (final String title in titles) {
+        expect(find.text(title), findsNothing, reason: reason ?? title);
+      }
+      final ScrollableState state = tester.state<ScrollableState>(list);
+      if (state.position.pixels >= state.position.maxScrollExtent) return;
+      await tester.drag(list, const Offset(0, -300));
+      await tester.pumpAndSettle();
+    }
+    fail('the settings list never reached its end');
+  }
+
   testWidgets('an Android phone in landscape with no top inset keeps all four '
       'gesture rows, and they are laid out on screen', (
     WidgetTester tester,
@@ -86,6 +123,7 @@ void main() {
 
     final Size surface = tester.view.physicalSize;
     for (final String title in gestureRowTitles()) {
+      await scrollTo(tester, find.text(title));
       final Finder row = find.text(title);
       expect(row, findsOneWidget, reason: title);
       final Rect rect = tester.getRect(row);
@@ -109,6 +147,7 @@ void main() {
     );
 
     for (final String title in gestureRowTitles()) {
+      await scrollTo(tester, find.text(title));
       expect(find.text(title), findsOneWidget, reason: title);
     }
   });
@@ -123,6 +162,7 @@ void main() {
     );
 
     for (final String title in gestureRowTitles()) {
+      await scrollTo(tester, find.text(title));
       expect(find.text(title), findsOneWidget, reason: title);
     }
   });
@@ -140,11 +180,10 @@ void main() {
       navigationMode: NavigationMode.directional,
     );
 
-    for (final String title in gestureRowTitles()) {
-      expect(find.text(title), findsNothing, reason: title);
-    }
     // The rest of the screen is untouched by the gate.
+    await scrollTo(tester, find.text(l10n.defaultPlayer));
     expect(find.text(l10n.defaultPlayer), findsOneWidget);
+    await expectAbsentThroughout(tester, gestureRowTitles());
   });
 
   testWidgets('a desktop window narrow enough to look like a phone still has '
@@ -156,10 +195,9 @@ void main() {
       size: const Size(420, 900),
     );
 
-    for (final String title in gestureRowTitles()) {
-      expect(find.text(title), findsNothing, reason: title);
-    }
+    await scrollTo(tester, find.text(l10n.defaultPlayer));
     expect(find.text(l10n.defaultPlayer), findsOneWidget);
+    await expectAbsentThroughout(tester, gestureRowTitles());
   });
 
   /// The subtitles-by-default row.
@@ -169,10 +207,13 @@ void main() {
   /// rather than a fixed word. Read off the [SettingsTile] rather than by
   /// finding the text: "Auto" is also what the default-player row says, and a
   /// bare text finder cannot tell the two rows apart.
-  String subtitleDefaultRow(WidgetTester tester) => tester
-      .widgetList<SettingsTile>(find.byType(SettingsTile, skipOffstage: false))
-      .firstWhere((SettingsTile tile) => tile.title == l10n.subtitleDefault)
-      .subtitle!;
+  Future<String> subtitleDefaultRow(WidgetTester tester) async {
+    await scrollTo(tester, find.text(l10n.subtitleDefault));
+    return tester
+        .widgetList<SettingsTile>(find.byType(SettingsTile, skipOffstage: false))
+        .firstWhere((SettingsTile tile) => tile.title == l10n.subtitleDefault)
+        .subtitle!;
+  }
 
   testWidgets('the subtitle default row reads Auto on a fresh install', (
     WidgetTester tester,
@@ -183,7 +224,7 @@ void main() {
       profile: const DeviceProfile(),
     );
 
-    expect(subtitleDefaultRow(tester), l10n.subtitleDefaultAuto);
+    expect(await subtitleDefaultRow(tester), l10n.subtitleDefaultAuto);
   });
 
   testWidgets('the subtitle default row reads back a stored Off', (
@@ -200,7 +241,7 @@ void main() {
     );
 
     expect(
-      subtitleDefaultRow(tester),
+      await subtitleDefaultRow(tester),
       l10n.off,
       reason: 'the row is a read-out, not a label',
     );
@@ -216,6 +257,7 @@ void main() {
       size: const Size(1920, 1080),
     );
 
+    await scrollTo(tester, find.text(l10n.subtitleDefault));
     expect(find.text(l10n.subtitleDefault), findsOneWidget);
   });
 
@@ -246,6 +288,7 @@ void main() {
         profile: const DeviceProfile(),
       );
 
+      await scrollTo(tester, find.text(l10n.hardwareDecoding));
       expect(find.text(l10n.hardwareDecoding), findsOneWidget);
     });
 
@@ -261,6 +304,7 @@ void main() {
         size: const Size(1920, 1080),
       );
 
+      await scrollTo(tester, find.text(l10n.hardwareDecoding));
       expect(find.text(l10n.hardwareDecoding), findsOneWidget);
     });
 
@@ -284,9 +328,9 @@ void main() {
           size: const Size(1280, 800),
         );
 
-        expect(
-          find.text(l10n.hardwareDecoding),
-          findsNothing,
+        await expectAbsentThroughout(
+          tester,
+          <String>[l10n.hardwareDecoding],
           reason:
               '$platform ignores the preference, so the row would be a switch '
               'that reports a decoder the app is not using',

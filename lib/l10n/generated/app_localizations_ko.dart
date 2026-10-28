@@ -1855,4 +1855,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String addonManageNoMatch(String query) {
     return 'No installed add-on matches \"$query\".';
   }
+
+  @override
+  String get connect => 'Connect';
+
+  @override
+  String get debridDisableAndDisconnect => 'Disable & Disconnect Debrid';
+
+  @override
+  String get debridDisabledAndRemoved => 'Debrid disabled and removed';
+
+  @override
+  String get selectBufferDuration => 'Select Buffer Duration';
 }

@@ -497,6 +497,10 @@
   "addonSourcesSearchHint": "Add-on, provider, quality…",
   "addonSourcesNoMatchFilter": "No links match. Clear search or try \"All\".",
   "addonManageSearchHint": "Search installed add-ons…",
-  "addonManageNoMatch": "No installed add-on matches \"{query}\"."
+  "addonManageNoMatch": "No installed add-on matches \"{query}\".",
+  "connect": "कनेक्ट करें",
+  "debridDisableAndDisconnect": "डेब्रिड अक्षम करें और डिसकनेक्ट करें",
+  "debridDisabledAndRemoved": "डेब्रिड अक्षम और हटा दिया गया",
+  "selectBufferDuration": "बफ़र अवधि चुनें"
 }
 

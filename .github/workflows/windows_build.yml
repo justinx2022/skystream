@@ -19,6 +19,7 @@ jobs:
   windows:
     name: Build Windows Release Installer
     runs-on: windows-2022
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 
@@ -59,7 +60,19 @@ jobs:
           JSON_EOF
 
       - name: Build Windows Release
-        run: flutter build windows --release --dart-define-from-file=dart-defines.json
+        run: >-
+          flutter build windows --release
+          --obfuscate --split-debug-info=build/symbols
+          --build-number=${{ github.run_number }}
+          --dart-define-from-file=dart-defines.json
+
+      - name: Upload Symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-symbols-${{ github.run_number }}
+          path: build/symbols
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Install Inno Setup
         shell: pwsh
@@ -76,15 +89,36 @@ jobs:
         run: |
           Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "skystream-windows-x64-custom.zip"
 
+      # sha256sum-style lines (lowercase hex, two spaces, bare file name) for
+      # both published artifacts. Get-FileHash rather than sha256sum: the
+      # Windows runner's pwsh always has it.
+      - name: Generate SHA256SUMS
+        shell: pwsh
+        run: |
+          $exes = @(Get-ChildItem windows\packaging\exe\Output\*.exe)
+          if ($exes.Count -eq 0) {
+            Write-Host "::error::no installer found in windows\packaging\exe\Output"
+            exit 1
+          }
+          $files = $exes + @(Get-Item skystream-windows-x64-custom.zip)
+          $lines = foreach ($f in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $f.FullName).Hash.ToLower()
+            "$hash  $($f.Name)"
+          }
+          # LF endings, so `sha256sum -c SHA256SUMS` works off-Windows too.
+          [IO.File]::WriteAllText("$PWD\SHA256SUMS", ($lines -join "`n") + "`n")
+          Get-Content SHA256SUMS
+
       - name: Publish to GitHub Releases
         uses: ncipollo/release-action@v1
         with:
           tag: "windows-latest"
           name: "SkyStream Windows Latest Release"
-          body: "Windows 64-bit installer and portable ZIP with Stremio pulsating loader, 2m-90m buffering, and fast dive-in."
+          body: "Windows 64-bit installer and portable ZIP with Stremio pulsating loader, 2m-90m buffering, and fast dive-in. SHA256SUMS is included."
           allowUpdates: true
           replacesArtifacts: true
           artifacts: |
             windows/packaging/exe/Output/*.exe
             skystream-windows-x64-custom.zip
+            SHA256SUMS
           token: ${{ secrets.GITHUB_TOKEN }}

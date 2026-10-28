@@ -261,7 +261,7 @@ void main() {
         reason: 'the feed was reopened',
       );
 
-      await tester.pumpWidget(const SizedBox());
+      await stopPlayer(tester);
     },
   );
 

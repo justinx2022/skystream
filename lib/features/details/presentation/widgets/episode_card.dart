@@ -450,7 +450,8 @@ class EpisodeCard extends HookConsumerWidget {
           size: 32,
         ),
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        tooltip: AppLocalizations.of(context)!.downloaded,
         onPressed: () {
           DownloadManagementDialog.show(
             context,
@@ -461,41 +462,54 @@ class EpisodeCard extends HookConsumerWidget {
         },
       );
     } else if (isDownloading) {
-      return SizedBox(
-        width: 32,
-        height: 32,
-        child: InkWell(
-          focusNode: focusNode,
-          onTap: () => DownloadProgressDialog.show(
-            context,
-            '${parentItem.title} - ${episode.name}',
-            episode.url,
-          ),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(4.0),
-            child: downloadProgressData?.status == TaskStatus.paused
-                ? Icon(
-                    Icons.pause_rounded,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.primary,
-                  )
-                : Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      CircularProgressIndicator(
-                        value: downloadProgress > 0 ? downloadProgress : null,
-                        strokeWidth: 2,
-                      ),
-                      Text(
-                        "${(downloadProgress * 100).toInt()}%",
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+      return Semantics(
+        button: true,
+        label: AppLocalizations.of(context)!.downloading,
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: InkWell(
+            focusNode: focusNode,
+            onTap: () => DownloadProgressDialog.show(
+              context,
+              '${parentItem.title} - ${episode.name}',
+              episode.url,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            child: Center(
+              // The ring stays at its 32 dp visual size inside the 48 dp target.
+              child: SizedBox(
+                width: 32,
+                height: 32,
+                child: Padding(
+                  padding: const EdgeInsets.all(4.0),
+                  child: downloadProgressData?.status == TaskStatus.paused
+                      ? Icon(
+                          Icons.pause_rounded,
+                          size: 16,
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      : Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: downloadProgress > 0
+                                  ? downloadProgress
+                                  : null,
+                              strokeWidth: 2,
+                            ),
+                            Text(
+                              "${(downloadProgress * 100).toInt()}%",
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
+                ),
+              ),
+            ),
           ),
         ),
       );
@@ -508,7 +522,8 @@ class EpisodeCard extends HookConsumerWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        tooltip: AppLocalizations.of(context)!.download,
         onPressed: () {
           ref
               .read(downloadLauncherProvider)

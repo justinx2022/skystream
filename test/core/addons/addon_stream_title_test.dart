@@ -64,8 +64,9 @@ void main() {
       );
       expect(ranked.take(2), [vvaan1080, vvaanCastle]);
       expect(ranked.skip(2).toSet(), {twilight4k, twilight1080, younger});
-      // Among themselves they keep the score's order.
-      expect(ranked[2], twilight4k);
+      // Among themselves they keep the score's order: without debrid the 4 GB
+      // 1080p copy outranks the 33 GB 4K remux, which no swarm will sustain.
+      expect(ranked.skip(2).toList(), [twilight1080, twilight4k, younger]);
     });
 
     test('are found under a catalog name full of release words', () {
@@ -119,7 +120,9 @@ void main() {
 
     test('for a title with no word distinctive enough to look for', () {
       final ranked = rankAddonStreams([vvaan1080, twilight4k], title: 'F1');
-      expect(names(ranked), names([twilight4k, vvaan1080]));
+      // Nothing to match on, so the score decides: the 1.2 GB 1080p link over
+      // the 33 GB 4K remux.
+      expect(names(ranked), names([vvaan1080, twilight4k]));
     });
 
     test('when no link names the film', () {

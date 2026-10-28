@@ -227,8 +227,11 @@ void main() {
         final ProviderContainer container = boot();
         await container.read(playerSettingsProvider.future);
         // `build` no longer waits on the secure store, so the two passwords
-        // arrive one channel round-trip after the rest of the settings.
-        await pumpEventQueue();
+        // arrive after the rest of the settings. That fold ends in a Hive
+        // delete on a real box - actual disk I/O, which a fixed run of
+        // event-queue turns cannot be trusted to outlast - so wait on the
+        // value rather than on a turn count.
+        await _waitForPasswords(container);
         final PlayerSettings settings = container
             .read(playerSettingsProvider)
             .requireValue;
@@ -540,4 +543,20 @@ void main() {
       );
     });
   });
+}
+
+/// Waits for the post-`build` secure-store fold to land.
+///
+/// The fold is deliberately not awaited by `build`, and it finishes with a
+/// Hive delete on a real box, so its completion is disk I/O rather than a
+/// fixed number of channel round-trips. Ten seconds is only a hang guard: the
+/// assertions after this still fail if the passwords never arrive.
+Future<void> _waitForPasswords(ProviderContainer container) async {
+  final Stopwatch waited = Stopwatch()..start();
+  while (waited.elapsed < const Duration(seconds: 10)) {
+    final PlayerSettings? settings =
+        container.read(playerSettingsProvider).value;
+    if (settings != null && settings.osPassword.isNotEmpty) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }

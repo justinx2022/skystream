@@ -497,6 +497,10 @@
   "addonSourcesSearchHint": "Add-on, provider, quality…",
   "addonSourcesNoMatchFilter": "No links match. Clear search or try \"All\".",
   "addonManageSearchHint": "Search installed add-ons…",
-  "addonManageNoMatch": "No installed add-on matches \"{query}\"."
+  "addonManageNoMatch": "No installed add-on matches \"{query}\".",
+  "connect": "ಸಂಪರ್ಕಿಸಿ",
+  "debridDisableAndDisconnect": "ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ ಮತ್ತು ಸಂಪರ್ಕ ಕಡಿತಗೊಳಿಸಿ",
+  "debridDisabledAndRemoved": "ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ ಮತ್ತು ತೆಗೆದುಹಾಕಲಾಗಿದೆ",
+  "selectBufferDuration": "ಬಫರ್ ಅವಧಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ"
 }
 

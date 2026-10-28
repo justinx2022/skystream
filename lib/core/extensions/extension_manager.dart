@@ -335,24 +335,22 @@ class ExtensionManager extends _$ExtensionManager {
   Future<List<SkyStreamProvider>> _loadPlugin(ExtensionPlugin plugin) async {
     if (_engine == null || _storageService == null) return [];
     try {
-      // SHA-256 verification of plugin.js against meta.json's installSha256
-      // is disabled; PluginStorageService.verifyIntegrity is kept intact for a
-      // signed-plugin distribution mode. Uncomment the block below to enable.
-      //
-      // final integrityOk = await _storageService!.verifyIntegrity(plugin);
-      // if (!integrityOk) {
-      //   if (kDebugMode) {
-      //     debugPrint(
-      //       "ExtensionManager: REFUSING to load ${plugin.packageName} — "
-      //       "plugin.js hash does not match meta.json installSha256. "
-      //       "Re-install the plugin to clear the warning.",
-      //     );
-      //   }
-      //   talker.error(
-      //     "Plugin integrity check failed for ${plugin.packageName} — refusing to load.",
-      //   );
-      //   return [];
-      // }
+      // A plugin whose JS no longer matches the hash recorded at install is
+      // not the code the user agreed to run.
+      final integrityOk = await _storageService!.verifyIntegrity(plugin);
+      if (!integrityOk) {
+        if (kDebugMode) {
+          debugPrint(
+            "ExtensionManager: REFUSING to load ${plugin.packageName} — "
+            "plugin.js hash does not match meta.json installSha256. "
+            "Re-install the plugin to clear the warning.",
+          );
+        }
+        talker.error(
+          "Plugin integrity check failed for ${plugin.packageName} — refusing to load.",
+        );
+        return [];
+      }
 
       final path = await _storageService!.getPluginJsPath(plugin);
       if (kDebugMode) {

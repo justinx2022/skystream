@@ -1897,4 +1897,18 @@ class AppLocalizationsKn extends AppLocalizations {
   String addonManageNoMatch(String query) {
     return 'No installed add-on matches \"$query\".';
   }
+
+  @override
+  String get connect => 'ಸಂಪರ್ಕಿಸಿ';
+
+  @override
+  String get debridDisableAndDisconnect =>
+      'ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ ಮತ್ತು ಸಂಪರ್ಕ ಕಡಿತಗೊಳಿಸಿ';
+
+  @override
+  String get debridDisabledAndRemoved =>
+      'ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ ಮತ್ತು ತೆಗೆದುಹಾಕಲಾಗಿದೆ';
+
+  @override
+  String get selectBufferDuration => 'ಬಫರ್ ಅವಧಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ';
 }

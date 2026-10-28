@@ -15,10 +15,10 @@ import '../../../../shared/focus/app_focus.dart';
 import '../addon_providers.dart';
 import '../../../../core/utils/layout_constants.dart';
 
-/// One-tap starter add-ons, matching the official Stremio apps: the two
-/// official add-ons that work the moment they are installed — Cinemeta for
-/// catalogs and metadata, OpenSubtitles v3 for subtitles. Everything else
-/// lives in the community directory on the Discover tab.
+/// One-tap starter add-ons: the two official add-ons that work the moment they
+/// are installed — Cinemeta for catalogs and metadata, OpenSubtitles v3 for
+/// subtitles — plus Torrentio for direct P2P streams. Everything else lives in
+/// the community directory on the Discover tab.
 class AddonPreset {
   final String name;
   final String description;
@@ -993,6 +993,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
   }
 
   Future<void> _disconnect() async {
+    final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _saving = true);
     try {
@@ -1003,10 +1004,12 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
         _keyController.clear();
       });
       messenger.showSnackBar(
-        const SnackBar(content: Text('Debrid disabled and removed')),
+        SnackBar(content: Text(l10n.debridDisabledAndRemoved)),
       );
     } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text('Error: $error')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.errorPrefix(error.toString()))),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -1043,6 +1046,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
     final config = ref.watch(debridSettingsProvider);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final l10n = AppLocalizations.of(context)!;
 
     ref.listen<DebridConfig>(debridSettingsProvider, (prev, next) {
       if (!next.isLoading && mounted) {
@@ -1209,7 +1213,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
                                   ),
                                 )
                               : const Icon(Icons.link_off_rounded),
-                          label: const Text('Disable & Disconnect Debrid'),
+                          label: Text(l10n.debridDisableAndDisconnect),
                         ),
                       );
                     },
@@ -1251,7 +1255,7 @@ class _DebridCardState extends ConsumerState<_DebridCard> {
                                   ),
                                 )
                               : const Icon(Icons.link_rounded),
-                          label: const Text('Connect'),
+                          label: Text(l10n.connect),
                         ),
                       );
                     },

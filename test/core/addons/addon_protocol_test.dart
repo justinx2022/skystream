@@ -272,7 +272,7 @@ void main() {
       expect(stream.sizeBytes, 5368709120);
     });
 
-    test('ranking puts resolution first and buries CAM rips', () {
+    test('ranking prefers direct links and orders each class by resolution', () {
       final direct1080 = parse(const {
         'url': 'https://x/a.mkv',
         'title': '1080p WEB-DL',
@@ -292,10 +292,12 @@ void main() {
       });
       final cam = parse(const {'url': 'https://x/cam.mkv', 'title': 'CAM'});
 
-      // Torrents are first-class: a 4K torrent outranks a 1080p direct link.
-      expect(torrent4k.score, greaterThan(direct1080.score));
-      // …but at equal resolution the instantly playable link wins.
+      // Playback is direct-only, so the instantly openable link wins even
+      // against a higher-resolution torrent.
+      expect(direct1080.score, greaterThan(torrent4k.score));
       expect(cachedDebrid4k.score, greaterThan(torrent4k.score));
+      // Within a class, resolution decides: 1080p over 720p over a CAM rip,
+      // which falls below zero rather than merely below its own band.
       expect(direct1080.score, greaterThan(direct720.score));
       expect(cam.score, lessThan(direct720.score));
       expect(cam.score, lessThan(0));

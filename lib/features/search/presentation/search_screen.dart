@@ -754,7 +754,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'No Results Found',
+            l10n.noResultsFound,
             style: TextStyle(
               fontFamily: nativeFont,
               fontSize: 16.0,

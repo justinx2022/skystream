@@ -504,10 +504,14 @@ class AddonStreamSource {
 
   /// Ranking score.
   ///
-  /// Resolution leads, because SkyStream streams torrents natively through the
-  /// bundled torrent server — unlike a browser client, a 4K torrent is not
-  /// second-class here. Direct links still get a head start for instant
-  /// playback, cached debrid links more so when debrid is configured, and CAM rips are buried.
+  /// Transport first: playback here is direct-only, so an instantly openable
+  /// HTTP/HLS link outranks a torrent at the same quality, and a stored torrent
+  /// preference must not demote the only kind that can open.
+  ///
+  /// Within a transport, resolution leads - a 1080p link beats a 720p one - and
+  /// CAM/TS rips are pushed below everything else rather than merely below
+  /// their own quality band, since they are the last thing anyone wants to
+  /// land on.
   ///
   /// When Debrid is OFF: Uses Swarm Velocity Scoring to pick streams that will
   /// PLAY SMOOTHLY, not just highest resolution. Penalizes 4K Remuxes (>12GB)
@@ -521,7 +525,7 @@ class AddonStreamSource {
     if (isCachedDebrid) {
       value += hasActiveDebrid ? 70 : -100;
     }
-    
+
     // --- SOURCE TYPE PRIORITY (when no debrid) ---
     if (!hasActiveDebrid) {
       if (preferredStreamType == PreferredStreamType.hlsDirect) {
@@ -538,7 +542,7 @@ class AddonStreamSource {
         }
       }
     }
-    
+
     if (isDirect) value += 45; // Keep existing small bonus too
 
     final bytes = sizeBytes;
@@ -587,8 +591,25 @@ class AddonStreamSource {
         value -= 150;
       }
 
-      // CAM/TS penalty
-      if (isCam) value -= 150;
+      // Resolution inside the transport class. Without it every direct link
+      // scored the same 545 and the sheet ordered them by seeders and size
+      // alone, so a 720p copy could sit above the 1080p one beside it.
+      if (quality >= 2160) {
+        value += 140;
+      } else if (quality >= 1440) {
+        value += 110;
+      } else if (quality >= 1080) {
+        value += 85;
+      } else if (quality >= 720) {
+        value += 45;
+      }
+      if (isHdr) value += 12;
+
+      // CAM/TS penalty. Larger than the direct-link bonus on purpose: a
+      // camcorder rip must fall below every real link, not merely below the
+      // better rips, or it wins the sheet whenever it is the only high-res
+      // entry an add-on returns.
+      if (isCam) value -= 600;
     } else {
       // Original quality scoring when debrid IS active
       final quality = qualityScore;

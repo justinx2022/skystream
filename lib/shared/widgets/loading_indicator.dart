@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:expressive_loading_indicator/expressive_loading_indicator.dart';
 
+import '../../l10n/generated/app_localizations.dart';
+
 /// A custom Material 3 Expressive Loading Indicator.
 ///
 /// This widget morphs between different rounded polygon shapes (such as softBurst,
@@ -16,6 +18,7 @@ class AppLoadingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = AppLocalizations.of(context)?.loading ?? 'Loading';
     if (constraints != null) {
       final double width = constraints!.hasBoundedWidth
           ? constraints!.maxWidth
@@ -30,18 +33,21 @@ class AppLoadingIndicator extends StatelessWidget {
       // If the targeted size is smaller than the default 48x48 layout container, we draw at
       // the standard 48x48 size and use FittedBox to scale the vector output cleanly.
       if (width < 48.0 || height < 48.0) {
-        return SizedBox(
-          width: width,
-          height: height,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: ExpressiveLoadingIndicator(
-              color: color,
-              constraints: const BoxConstraints(
-                minWidth: 48.0,
-                minHeight: 48.0,
-                maxWidth: 48.0,
-                maxHeight: 48.0,
+        return Semantics(
+          label: label,
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: FittedBox(
+              fit: BoxFit.contain,
+              child: ExpressiveLoadingIndicator(
+                color: color,
+                constraints: const BoxConstraints(
+                  minWidth: 48.0,
+                  minHeight: 48.0,
+                  maxWidth: 48.0,
+                  maxHeight: 48.0,
+                ),
               ),
             ),
           ),
@@ -49,6 +55,9 @@ class AppLoadingIndicator extends StatelessWidget {
       }
     }
 
-    return ExpressiveLoadingIndicator(color: color, constraints: constraints);
+    return Semantics(
+      label: label,
+      child: ExpressiveLoadingIndicator(color: color, constraints: constraints),
+    );
   }
 }

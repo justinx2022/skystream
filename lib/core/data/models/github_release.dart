@@ -39,11 +39,16 @@ class GithubAsset {
   final int size;
   final String contentType;
 
+  /// `sha256:<hex>` as published by the GitHub releases API, or null for
+  /// assets uploaded before digests were exposed.
+  final String? digest;
+
   GithubAsset({
     required this.name,
     required this.browserDownloadUrl,
     required this.size,
     required this.contentType,
+    this.digest,
   });
 
   factory GithubAsset.fromJson(Map<String, dynamic> json) {
@@ -52,6 +57,7 @@ class GithubAsset {
       browserDownloadUrl: json['browser_download_url'] as String? ?? '',
       size: json['size'] as int? ?? 0,
       contentType: json['content_type'] as String? ?? '',
+      digest: json['digest'] as String?,
     );
   }
 }

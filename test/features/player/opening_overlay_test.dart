@@ -106,7 +106,9 @@ void main() {
                 const AsyncValue.data(DeviceProfile(isTv: false)),
               ),
               playerSettingsProvider.overrideWithBuild(
-                (_, _) => const PlayerSettings(),
+                // The rows this test lays out are the detailed view's; Seamless
+                // Playback, the shipped default, shows none of them.
+                (_, _) => const PlayerSettings(seamlessPlayback: false),
               ),
               activeProviderProvider.overrideWithValue(null),
               historyRepositoryProvider.overrideWithValue(NoHistory()),
@@ -143,7 +145,7 @@ void main() {
               'test proves nothing',
         );
 
-        await tester.pumpWidget(const SizedBox());
+        await stopPlayer(tester);
       },
     );
 

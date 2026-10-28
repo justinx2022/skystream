@@ -746,12 +746,13 @@ void showBufferDurationDialog(
   int currentMinutes,
 ) {
   const options = kBufferDurationMinutesChoices;
+  final l10n = AppLocalizations.of(context)!;
 
   showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
       surfaceTintColor: Colors.transparent,
-      title: const Text('Select Buffer Duration'),
+      title: Text(l10n.selectBufferDuration),
       content: RadioGroup<int>(
         groupValue: currentMinutes,
         onChanged: (val) {

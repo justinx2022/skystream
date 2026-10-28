@@ -241,15 +241,35 @@ void main() {
     }
     expect(bandRatio(tester), greaterThan(0));
 
-    // The demuxer stops consuming: stalled, or the counters were reset by a
-    // reopen. A band that kept its old width would be claiming a buffer that
-    // is not there, which is the one thing worse than showing nothing.
-    // Two ticks: one to take the sample, one for the round trip that answers
-    // it. The sampler refuses to overlap requests, so a single pump can land
-    // while the previous one is still in flight.
+    // A second in which the demuxer consumed nothing. On HLS that is every
+    // second between segment reads - the demuxer takes a whole segment, then
+    // drains it while playback carries on - and the band has to survive it:
+    // the bytes it describes are still sitting in the prefetch window, so a
+    // band that emptied here would blink once a segment.
+    final beforeIdle = bandRatio(tester);
     for (var i = 0; i < 2; i++) {
       await tick(62000 + i * 1000);
       stats(read: 16000000, demux: 11000000);
+      await tester.pump(const Duration(seconds: 1));
+      await settle(tester);
+    }
+    expect(
+      bandRatio(tester),
+      greaterThanOrEqualTo(beforeIdle),
+      reason: 'a demuxer between segment reads is not a lost buffer',
+    );
+
+    // Now the counters restart: a reopen, or a segment fetched out of order.
+    // The rate and the gap were both measured on counters that no longer
+    // exist, so there is no estimate to draw - and a band that kept its old
+    // width would be claiming a buffer that is not there, which is the one
+    // thing worse than showing nothing.
+    // Three ticks: one to take the sample, one for the round trip that answers
+    // it, and one spare. The sampler refuses to overlap requests, so a single
+    // pump can land while the previous one is still in flight.
+    for (var i = 0; i < 3; i++) {
+      await tick(64000 + i * 1000);
+      stats(read: 2000000, demux: 1000000);
       await tester.pump(const Duration(seconds: 1));
       await settle(tester);
     }

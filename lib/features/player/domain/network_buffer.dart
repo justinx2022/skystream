@@ -148,10 +148,13 @@ const int kMaxTorrentBehindMb = 64;
 ///
 /// Returns a percentage rather than a size because that is TorrServer's unit,
 /// and it is rounded, so the arithmetic is worth a test rather than a comment.
+///
+/// Rounded up: rounding down was what let a 4 GB cache keep almost 82 MB of
+/// history, because half a percent of a cache that large is more than the cap.
 int torrentReadAheadPercent(int cacheMb) {
   if (cacheMb <= 0) return 95;
   final behind = (cacheMb * 0.25).round().clamp(0, kMaxTorrentBehindMb);
-  final ahead = ((cacheMb - behind) / cacheMb * 100).round();
+  final ahead = ((cacheMb - behind) / cacheMb * 100).ceil();
   // Never so little read-ahead that the torrent cannot keep up; the behind
   // window is a convenience and the ahead window is the playback.
   return ahead.clamp(60, 99);

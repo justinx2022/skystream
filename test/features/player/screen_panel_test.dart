@@ -19,11 +19,9 @@ import 'package:skystream/features/player/presentation/vlc/panel/player_panel.da
     show PlayerPanel;
 import 'package:skystream/features/player/presentation/vlc/panel/player_panel_row.dart';
 import 'package:skystream/features/player/presentation/vlc/panel/player_sources_tab.dart';
-import 'package:skystream/features/player/presentation/vlc/panel/player_tracks_tab.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
 
 import 'fake_vlc_engine.dart';
-import 'package:skystream/features/player/domain/network_buffer.dart';
 import 'package:skystream/features/settings/presentation/player_settings_provider.dart';
 
 import 'vlc_screen_harness.dart';
@@ -490,13 +488,13 @@ void main() {
   );
 
   testWidgets(
-    'the torrent server gets the buffer the viewer chose, split to keep some '
-    'of it behind the playhead',
+    'a direct stream never starts the torrent server',
     variant: texturePlatform,
     (tester) async {
-      // One number for both engines. libVLC takes it as a prefetch window and
-      // TorrServer as its piece cache; the cache used to be a hard-coded
-      // 64 MB, so the setting moved one engine and not the other.
+      // Playback is HLS and direct files only: a magnet is refused during
+      // resolution, so no session reaches the piece cache and the viewer's
+      // buffer setting is libVLC's prefetch window alone to spend. This used
+      // to pin the same number reaching both engines.
       final torrents = _FakeTorrents();
       await pumpPlayer(
         tester,
@@ -505,104 +503,13 @@ void main() {
       );
       await sendFirstFrame(tester);
 
-      expect(torrents.cacheMb, 256, reason: 'the chosen size, not a constant');
       expect(
-        torrents.readAheadPercent,
-        torrentReadAheadPercent(256),
-        reason: 'and the split that leaves a backward window behind it',
-      );
-      // The remainder is the only backward buffer this player has anywhere:
-      // libVLC 3's prefetch filter takes a size and decides the rest itself.
-      final behindMb = 256 * (100 - torrents.readAheadPercent!) / 100;
-      expect(
-        behindMb,
-        greaterThanOrEqualTo(8),
-        reason: 'enough for the ten second step the seek controls take',
+        torrents.cacheMb,
+        isNull,
+        reason: 'nothing torrent-shaped is playing, so nothing is configured',
       );
 
       await sendEvent(tester, snapshot(state: 'paused'));
-    },
-  );
-
-  testWidgets(
-    'a hand-picked pack file drops season and episode from the subtitle '
-    'search target',
-    variant: texturePlatform,
-    (tester) async {
-      final torrents = _FakeTorrents();
-      await pumpPlayer(
-        tester,
-        item: show,
-        episode: firstEpisode,
-        videoUrl: firstEpisode.url,
-        preloadedStreams: const <StreamResult>[
-          StreamResult(
-            url: 'magnet:?xt=urn:btih:pack',
-            source: 'Torrent Pack',
-            providerName: 'T',
-          ),
-        ],
-        overrides: [
-          torrentServiceProvider.overrideWithValue(torrents),
-          // The show names a plugin, so resolution asks the extension
-          // manager for it - and the real one wants a JS engine.
-          extensionManagerProvider.overrideWith(
-            () => _FakeExtensions(
-              _FakePlugin(const <String, List<StreamResult>>{}),
-            ),
-          ),
-        ],
-      );
-      await sendFirstFrame(tester);
-      final l10n = await english();
-
-      // Opened first and left up: the file list arrives from the three-second
-      // poll, and the bars would have hidden themselves by then.
-      await openFromBar(tester, l10n.subtitles);
-      var target = tester
-          .widget<PlayerTracksTab>(find.byType(PlayerTracksTab))
-          .target;
-      expect(
-        (target?.season, target?.episode),
-        (1, 1),
-        reason: 'the URL match says episode one is playing, and it is',
-      );
-
-      for (var i = 0; i < 4; i++) {
-        await tester.pump(const Duration(seconds: 1));
-      }
-      await tester.tap(find.text(l10n.playerFiles));
-      await settle(tester);
-      expect(find.widgetWithText(PanelRow, 'S01E02.mkv'), findsOneWidget);
-
-      // The viewer picks the second file out of the pack by hand. What is
-      // playing is now whatever that file is - not the episode the URL match
-      // named - so a subtitle search scoped to S01E01 would be scoped to the
-      // wrong episode.
-      await tester.tap(find.widgetWithText(PanelRow, 'S01E02.mkv'));
-      await settle(tester);
-      expect(find.byType(PlayerPanel), findsNothing, reason: 'closed on pick');
-
-      // The pick reopens the engine on the new file, so the chrome only comes
-      // back once that file has produced a frame.
-      await sendEvent(tester, snapshot(position: 2000));
-      await settle(tester);
-
-      await openFromBar(tester, l10n.subtitles);
-      target = tester
-          .widget<PlayerTracksTab>(find.byType(PlayerTracksTab))
-          .target;
-      expect(target?.title, 'Show', reason: 'the show is still the show');
-      expect(
-        (target?.season, target?.episode),
-        (null, null),
-        reason:
-            'a hand-picked pack file may not be the episode the screen '
-            'thinks is playing, so the search is scoped to the show rather '
-            'than to an episode it cannot vouch for',
-      );
-
-      await tester.pumpWidget(const SizedBox());
     },
   );
 

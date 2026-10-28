@@ -842,7 +842,9 @@ class _TmdbMovieDetailsScreenState
                   () {
                     final parsed = DateTime.tryParse(releaseDate);
                     if (parsed != null) {
-                      return DateFormat('MMMM d, yyyy').format(parsed);
+                      return DateFormat.yMMMMd(
+                        Localizations.localeOf(context).toString(),
+                      ).format(parsed);
                     }
                     return releaseDate.isNotEmpty ? releaseDate : l10n.unknown;
                   }(),

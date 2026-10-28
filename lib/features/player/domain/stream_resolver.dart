@@ -594,6 +594,12 @@ Future<int> _firstHealthyStream(
   var dispatched = 0;
   var abandoned = false;
   Timer? deadline;
+  // Fires once the youngest probe still in flight has spent as long at its
+  // link as the quickest answer took, which is the moment it can no longer
+  // beat that answer. Without it the check only asks that question when some
+  // other probe answers, so one silent mirror - a dead CDN, an unreachable
+  // host - holds a settled answer back until [budget].
+  Timer? prune;
   // When each probe went out, so one still waiting can be ruled out once it
   // has spent longer at its link than the quickest answer took.
   final sentAt = <int, Duration>{};
@@ -605,6 +611,7 @@ Future<int> _firstHealthyStream(
   void finish(int index) {
     if (completer.isCompleted) return;
     deadline?.cancel();
+    prune?.cancel();
     completer.complete(index);
   }
 
@@ -651,6 +658,36 @@ Future<int> _firstHealthyStream(
     return false;
   }
 
+  /// Ends the check the moment every probe still in flight has spent at least
+  /// as long as [best] took, since none of them can answer sooner than that.
+  ///
+  /// The delay is measured on the same clock as [sentAt], so it is exact
+  /// rather than an estimate; a probe dispatched later re-arms it through
+  /// [decide].
+  void armPrune(int best) {
+    if (completer.isCompleted) return;
+    prune?.cancel();
+    final bestTtfb = results[best]!.ttfb;
+    Duration? left;
+    for (final c in order.take(dispatched)) {
+      if (results.containsKey(c)) continue;
+      final spent = clock.elapsed - (sentAt[c] ?? Duration.zero);
+      final remaining = bestTtfb - spent;
+      if (remaining <= Duration.zero) {
+        // Already past the point where it could win.
+        finish(best);
+        return;
+      }
+      if (left == null || remaining < left) left = remaining;
+    }
+    if (left == null) return;
+    prune = Timer(left, () {
+      if (completer.isCompleted) return;
+      final winner = fastestReached();
+      if (winner != null) finish(winner);
+    });
+  }
+
   void decide() {
     if (completer.isCompleted) return;
     // The quickest answer wins as soon as nothing could still beat it.
@@ -662,10 +699,15 @@ Future<int> _firstHealthyStream(
     // Nothing has answered yet, or a late replacement could still win: give
     // the probes in flight until they answer; only the budget may cut that
     // short.
+    var waiting = false;
     for (final c in order.take(dispatched)) {
-      if (!results.containsKey(c)) return;
+      if (!results.containsKey(c)) waiting = true;
     }
-    finish(best ?? start);
+    if (!waiting) {
+      finish(best ?? start);
+      return;
+    }
+    if (best != null) armPrune(best);
   }
 
   late final void Function() dispatchNext;

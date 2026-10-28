@@ -114,10 +114,6 @@ class TvLogicalScale extends StatelessWidget {
         viewPadding: media.viewPadding / scale,
         viewInsets: media.viewInsets / scale,
         systemGestureInsets: media.systemGestureInsets / scale,
-        // A television's font scale is the set's, and the ten-foot ramp in
-        // this app is already sized for the distance. Honouring both would
-        // apply the room twice.
-        textScaler: TextScaler.noScaling,
       ),
       // [FittedBox] rather than a bare [Transform]: the transform does not
       // constrain, and a [SizedBox] under one cannot shrink below the tight

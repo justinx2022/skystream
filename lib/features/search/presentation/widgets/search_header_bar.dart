@@ -491,10 +491,10 @@ class _SearchHeaderBarState extends ConsumerState<SearchHeaderBar> {
                                           ? theme.colorScheme.primary
                                                 .withValues(alpha: 0.15)
                                           : Colors.transparent,
-                                      minimumSize: const Size(32, 32),
+                                      // The field is 48 dp tall, so a full-size
+                                      // target fits without padding the layout.
+                                      minimumSize: const Size(48, 48),
                                       padding: EdgeInsets.zero,
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
                                     ),
                                     onPressed: () {
                                       widget.textController.clear();

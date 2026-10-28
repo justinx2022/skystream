@@ -6,14 +6,15 @@ import 'package:vlc_player/vlc_player.dart';
 
 import 'fake_vlc_engine.dart';
 
-/// Switching a track lands now, not one caching interval from now.
+/// Switching a track changes it in place, with no rebuffer behind it.
 ///
-/// A stream selected mid-playback begins at the demuxer's read point, which
-/// sits a whole caching interval ahead of the picture, so the newly chosen
-/// audio stays silent while the clock catches up. Re-issuing the current
-/// position flushes every stream and refills them together, which is the same
-/// thing a viewer discovers by scrubbing a little after switching - and it is
-/// what mpv did for free.
+/// This file used to pin the opposite: re-issuing the current position after
+/// the switch, so the newly chosen stream - which begins at the demuxer's read
+/// point, a whole caching interval ahead of the picture - was flushed and
+/// refilled together. That cost every stream a rebuffer, spinner included, for
+/// a track the engine had already switched; it is gone, and these tests pin
+/// what replaced it. A subtitle switch to Off still pays even less: nothing
+/// has to be fetched to show nothing.
 void main() {
   Future<VlcPlayerController> attach(FakeVlcEngine engine) async {
     engine.install();
@@ -59,7 +60,7 @@ void main() {
     VlcTrackDescription(id: 3, name: 'French', language: 'fra'),
   ];
 
-  testWidgets('choosing an audio track re-seats playback where it is', (
+  testWidgets('choosing an audio track switches it without re-seating', (
     tester,
   ) async {
     final engine = playingEngine();
@@ -81,17 +82,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(engine.methods, contains('setAudioTrack'));
+    // Re-issuing the position would flush every stream and show a rebuffer in
+    // exchange for a track that has already changed, so the switch is the
+    // whole of the work.
     expect(
-      engine.methods.indexOf('seekTo'),
-      greaterThan(engine.methods.indexOf('setAudioTrack')),
-      reason: 'the flush has to come after the switch, or it flushes the old '
-          'selection and changes nothing',
-    );
-    expect(
-      (engine.callsTo('seekTo').last.arguments
-          as Map<Object?, Object?>)['position'],
-      60000,
-      reason: 're-issued where the viewer already is, not somewhere else',
+      engine.methods,
+      isNot(contains('seekTo')),
+      reason: 'the flush would rebuffer the whole stream for a track the '
+          'engine has already switched',
     );
 
     controller.dispose();

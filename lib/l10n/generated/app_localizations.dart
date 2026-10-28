@@ -3440,6 +3440,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No installed add-on matches \"{query}\".'**
   String addonManageNoMatch(String query);
+
+  /// Button that stores a debrid account key and starts resolving links through it.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get connect;
+
+  /// Button that clears the stored debrid key. An ampersand, not a sentence; keep it under about 30 characters.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable & Disconnect Debrid'**
+  String get debridDisableAndDisconnect;
+
+  /// Confirmation snackbar after the debrid key is cleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Debrid disabled and removed'**
+  String get debridDisabledAndRemoved;
+
+  /// Title of the dialog that picks how many minutes the player buffers ahead.
+  ///
+  /// In en, this message translates to:
+  /// **'Select Buffer Duration'**
+  String get selectBufferDuration;
 }
 
 class _AppLocalizationsDelegate
