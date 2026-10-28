@@ -30,6 +30,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
 import 'package:skystream/core/router/app_router.dart' show kPlayerRoutePath;
+import 'package:skystream/core/theme/app_world.dart';
+import 'package:skystream/core/theme/world_provider.dart';
 import 'package:skystream/features/settings/presentation/general_settings_provider.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:skystream/shared/widgets/app_scaffold.dart';
@@ -320,6 +322,42 @@ void main() {
 
       router.pop();
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('the two worlds', () {
+    testWidgets('the branch decides the world, and discovery stays SKY', (
+      tester,
+    ) async {
+      final router = await pumpShell(tester, isTv: true);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(_TapProbe)),
+        listen: false,
+      );
+
+      expect(
+        container.read(appWorldProvider),
+        AppWorld.sky,
+        reason: 'the app opens on Home',
+      );
+
+      router.go('/library');
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(appWorldProvider),
+        AppWorld.ground,
+        reason: 'Library is the personal world',
+      );
+
+      router.go('/search');
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(appWorldProvider),
+        AppWorld.sky,
+        reason: 'going back to discovery returns the sky',
+      );
     });
   });
 }

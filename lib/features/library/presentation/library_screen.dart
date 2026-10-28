@@ -7,11 +7,13 @@ import '../../../core/utils/responsive_breakpoints.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import 'widgets/bookmarks_tab.dart';
 import 'widgets/downloads_tab.dart';
+import 'widgets/history_tab.dart';
 import '../../../shared/focus/app_focus.dart';
+import '../../../core/theme/app_world.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
-  /// 0 = Downloads, 1 = Bookmarks. Settings opens the screen on a given tab
-  /// now that Library is no longer a navigation destination.
+  /// 0 = Downloads, 1 = Bookmarks, 2 = History. Settings can open the screen
+  /// on a given tab.
   final int initialTab;
 
   const LibraryScreen({super.key, this.initialTab = 0});
@@ -28,9 +30,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    final initial = widget.initialTab.clamp(0, 1);
+    final initial = widget.initialTab.clamp(0, 2);
     _tabController = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
       initialIndex: initial,
     );
@@ -96,9 +98,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                   _tabController.animateTo(index);
                 },
                 physics: const BouncingScrollPhysics(),
-                itemCount: 2,
-                itemBuilder: (_, i) =>
-                    i == 0 ? const DownloadsTab() : const BookmarksTab(),
+                itemCount: 3,
+                itemBuilder: (_, i) => switch (i) {
+                  0 => const DownloadsTab(),
+                  1 => const BookmarksTab(),
+                  _ => const HistoryTab(),
+                },
               ),
             ),
           ],
@@ -122,6 +127,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
               text: AppLocalizations.of(context)!.bookmarks,
               icon: const Icon(Icons.bookmark_rounded),
             ),
+            Tab(
+              text: AppLocalizations.of(context)!.history,
+              icon: const Icon(Icons.history_rounded),
+            ),
           ],
         ),
       ),
@@ -131,14 +140,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
           _tabController.animateTo(index);
         },
         physics: const BouncingScrollPhysics(),
-        children: const [DownloadsTab(), BookmarksTab()],
+        children: const [DownloadsTab(), BookmarksTab(), HistoryTab()],
       ),
     );
   }
 
   Widget _buildTabChips(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
 
     return AnimatedBuilder(
       animation: _tabController,
@@ -151,7 +159,6 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
               icon: Icons.download_for_offline_rounded,
               selected: _tabController.index == 0,
               onTap: () => _tabController.animateTo(0),
-              theme: theme,
             ),
             const SizedBox(width: 8),
             _TabChip(
@@ -159,7 +166,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
               icon: Icons.bookmark_rounded,
               selected: _tabController.index == 1,
               onTap: () => _tabController.animateTo(1),
-              theme: theme,
+            ),
+            const SizedBox(width: 8),
+            _TabChip(
+              label: l10n.history,
+              icon: Icons.history_rounded,
+              selected: _tabController.index == 2,
+              onTap: () => _tabController.animateTo(2),
             ),
           ],
         );
@@ -173,14 +186,12 @@ class _TabChip extends StatefulWidget {
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
-  final ThemeData theme;
 
   const _TabChip({
     required this.label,
     required this.icon,
     required this.selected,
     required this.onTap,
-    required this.theme,
   });
 
   @override
@@ -192,12 +203,13 @@ class _TabChipState extends State<_TabChip> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = widget.theme;
+    final world = AppWorldTokens.colorsOf(context);
     // Read through [FocusVisibility] rather than [FocusManager] directly: the
     // highlight mode alone does not rebuild this widget when it changes, and
     // it calls a mouse click keyboard navigation.
     final showHighlight = showFocusIndicator(context, _isFocused);
     final scale = showHighlight ? 1.04 : 1.0;
+    final accent = world.accent;
 
     return Focus(
       onFocusChange: (f) {
@@ -224,19 +236,13 @@ class _TabChipState extends State<_TabChip> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
               color: widget.selected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.15)
-                  : theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.3,
-                    ),
+                  ? accent.withValues(alpha: 0.16)
+                  : world.textPrimary.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(LayoutConstants.radiusPill),
               border: showHighlight
                   ? AppFocus.border(context, focused: true)
                   : (widget.selected
-                        ? Border.all(
-                            color: theme.colorScheme.primary.withValues(
-                              alpha: 0.3,
-                            ),
-                          )
+                        ? Border.all(color: accent.withValues(alpha: 0.35))
                         : Border.all(color: Colors.transparent, width: 1)),
             ),
             child: Row(
@@ -245,9 +251,7 @@ class _TabChipState extends State<_TabChip> {
                 Icon(
                   widget.icon,
                   size: 16,
-                  color: widget.selected
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
+                  color: widget.selected ? accent : world.textSecondary,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -257,9 +261,7 @@ class _TabChipState extends State<_TabChip> {
                     fontWeight: widget.selected
                         ? FontWeight.w600
                         : FontWeight.normal,
-                    color: widget.selected
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
+                    color: widget.selected ? accent : world.textSecondary,
                   ),
                 ),
               ],

@@ -336,6 +336,16 @@ class AppLocalizationsHi extends AppLocalizations {
   String get bookmarks => 'बुकमार्क';
 
   @override
+  String get history => 'इतिहास';
+
+  @override
+  String get historyEmptyTitle => 'अभी तक कुछ नहीं देखा';
+
+  @override
+  String get historyEmptyMessage =>
+      'आप जो भी चलाएँगे वह यहाँ दिखेगा, ताकि आप वहीं से आगे बढ़ सकें जहाँ आपने छोड़ा था।';
+
+  @override
   String get noDownloadsYet => 'अभी तक कोई डाउनलोड नहीं';
 
   @override
@@ -394,6 +404,10 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'आपकी लाइब्रेरी खाली है';
+
+  @override
+  String get libraryEmptyMessage =>
+      'कोई शीर्षक सहेजें और वह यहाँ आपका इंतज़ार करेगा।';
 
   @override
   String get language => 'भाषा';

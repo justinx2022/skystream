@@ -334,6 +334,16 @@ class AppLocalizationsVi extends AppLocalizations {
   String get bookmarks => 'Đã lưu';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Chưa có nội dung tải xuống';
 
   @override
@@ -390,6 +400,9 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'Thư viện của bạn đang trống';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Ngôn ngữ';

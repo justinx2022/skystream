@@ -6,7 +6,8 @@ import '../../../../core/router/app_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/responsive_breakpoints.dart';
-
+import '../../../../l10n/generated/app_localizations.dart';
+import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/multimedia_card.dart';
 import '../../../../shared/widgets/shimmer_placeholder.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
@@ -121,6 +122,7 @@ class _ViewAllScreenState extends ConsumerState<ViewAllScreen> {
     final ViewAllState state = ref.watch(
       viewAllControllerProvider(widget.category),
     );
+    final l10n = AppLocalizations.of(context)!;
 
     // Calculate aspect ratio dynamically
     final isDesktop = context.isDesktop;
@@ -149,63 +151,69 @@ class _ViewAllScreenState extends ConsumerState<ViewAllScreen> {
         ),
         elevation: 0,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.8),
-              Theme.of(context).scaffoldBackgroundColor,
-            ],
-            stops: const [0.0, 0.3],
-          ),
-        ),
-        child: GridView.builder(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: maxExtent,
-            childAspectRatio: childAspectRatio,
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-          ),
-          itemCount:
-              state.items.length + (state.isLoading ? crossAxisCount : 0),
-          itemBuilder: (context, index) {
-            if (index >= state.items.length) {
-              return ShimmerPlaceholder(borderRadius: 12);
-            }
+      body: state.items.isEmpty && !state.isLoading
+          ? EmptyState(
+              icon: Icons.search_off_rounded,
+              title: l10n.noResultsFound,
+            )
+          : Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Theme.of(context).scaffoldBackgroundColor
+                        .withValues(alpha: 0.8),
+                    Theme.of(context).scaffoldBackgroundColor,
+                  ],
+                  stops: const [0.0, 0.3],
+                ),
+              ),
+              child: GridView.builder(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: maxExtent,
+                  childAspectRatio: childAspectRatio,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                ),
+                itemCount:
+                    state.items.length + (state.isLoading ? crossAxisCount : 0),
+                itemBuilder: (context, index) {
+                  if (index >= state.items.length) {
+                    return ShimmerPlaceholder(borderRadius: 12);
+                  }
 
-            final item = state.items[index];
-            final imageUrl = item.posterImageUrl;
-            final itemTitle = item.title;
-            final uniqueTag =
-                'view_all_${widget.category.name}_${item.id}_$index';
+                  final item = state.items[index];
+                  final imageUrl = item.posterImageUrl;
+                  final itemTitle = item.title;
+                  final uniqueTag =
+                      'view_all_${widget.category.name}_${item.id}_$index';
 
-            return MultimediaCard(
-              imageUrl: imageUrl,
-              title: itemTitle,
-              heroTag: uniqueTag,
-              isPortrait: _isPortrait,
-              onTap: () {
-                if (widget.onTap != null) {
-                  widget.onTap!(item);
-                } else {
-                  TmdbDetailsRoute(
-                    movieId: item.id,
-                    mediaType: item.tmdbMediaType,
+                  return MultimediaCard(
+                    imageUrl: imageUrl,
+                    title: itemTitle,
                     heroTag: uniqueTag,
-                    placeholderPoster: imageUrl,
-                    source: item.source,
-                  ).push<void>(context);
-                }
-              },
-            );
-          },
-        ),
-      ),
+                    isPortrait: _isPortrait,
+                    onTap: () {
+                      if (widget.onTap != null) {
+                        widget.onTap!(item);
+                      } else {
+                        TmdbDetailsRoute(
+                          movieId: item.id,
+                          mediaType: item.tmdbMediaType,
+                          heroTag: uniqueTag,
+                          placeholderPoster: imageUrl,
+                          source: item.source,
+                        ).push<void>(context);
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
     );
 
     return scaffold;

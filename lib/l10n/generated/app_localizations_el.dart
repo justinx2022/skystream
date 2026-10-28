@@ -336,6 +336,16 @@ class AppLocalizationsEl extends AppLocalizations {
   String get bookmarks => 'Σελιδοδείκτες';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Δεν υπάρχουν ακόμα λήψεις';
 
   @override
@@ -394,6 +404,9 @@ class AppLocalizationsEl extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'Η βιβλιοθήκη σας είναι άδεια';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Γλώσσα';

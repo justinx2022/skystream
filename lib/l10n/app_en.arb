@@ -163,6 +163,9 @@
   "lastVideosTVShows": "Last videos TV Shows",
   "downloads": "Downloads",
   "bookmarks": "Bookmarks",
+  "history": "History",
+  "historyEmptyTitle": "Nothing watched yet",
+  "historyEmptyMessage": "Titles you play will appear here, so you can pick them up where you left off.",
   "noDownloadsYet": "No downloads yet",
   "episodesCount": "{count} Episodes • {done} Done",
   "@episodesCount": {
@@ -201,6 +204,7 @@
   "deleteDownload": "Delete Download",
   "confirmDeleteDownload": "Are you sure you want to delete this download and its file?",
   "libraryEmpty": "Your library is empty",
+  "libraryEmptyMessage": "Save a title and it will be waiting here.",
   "language": "Language",
   "english": "English",
   "hindi": "Hindi (हिंदी)",

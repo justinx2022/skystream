@@ -332,6 +332,16 @@ class AppLocalizationsKo extends AppLocalizations {
   String get bookmarks => '즐겨찾기';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => '다운로드한 콘텐츠가 없습니다';
 
   @override
@@ -388,6 +398,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get libraryEmpty => '라이브러리가 비어 있습니다';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => '언어';

@@ -6,12 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:skystream/core/providers/device_info_provider.dart';
 import 'package:skystream/core/theme/app_backdrop_layer.dart';
+import 'package:skystream/core/theme/app_world.dart';
+import 'package:skystream/core/theme/world_provider.dart';
 import 'package:skystream/core/utils/layout_constants.dart';
 import 'package:skystream/core/utils/responsive_breakpoints.dart';
 import 'package:skystream/shared/widgets/custom_bottom_nav.dart';
 import 'package:skystream/shared/widgets/app_sidebar.dart';
 
 import 'package:skystream/l10n/generated/app_localizations.dart';
+
 import '../../features/settings/presentation/general_settings_provider.dart';
 import 'loading_indicator.dart';
 
@@ -70,6 +73,10 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
   /// re-armed forever and the cursor would never go. The player learned the
   /// same lesson - see `_onHover` in vlc_player_controls.dart.
   Offset? _pointerAt;
+
+  /// The world the shell last told `appWorldProvider` about, so a rebuild that
+  /// stays in the same world schedules nothing.
+  AppWorld? _lastWorld;
 
   @override
   void dispose() {
@@ -156,6 +163,16 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
   }
 
   void _onItemTapped(int index, BuildContext context) {
+    _goToBranch(index);
+  }
+
+  /// Moves to [index] and tells the theme which world it is about to be in.
+  ///
+  /// Synchronous rather than waiting for the post-frame callback in [build]:
+  /// a branch change repaints immediately, and the one frame before the
+  /// callback would paint GROUND with SKY's surfaces.
+  void _goToBranch(int index) {
+    ref.read(appWorldProvider.notifier).setWorld(AppWorld.forBranch(index));
     widget.navigationShell.goBranch(
       index,
       initialLocation: index == widget.navigationShell.currentIndex,
@@ -215,6 +232,18 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    // The branch decides the world, and the world decides the theme the whole
+    // app is painted with. Written after the frame, never during build: a
+    // notifier cannot be mutated while the tree is being built, and the guard
+    // keeps a rebuild that does not change world from scheduling anything.
+    final world = AppWorld.forBranch(widget.navigationShell.currentIndex);
+    if (world != _lastWorld) {
+      _lastWorld = world;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(appWorldProvider.notifier).setWorld(world);
+      });
+    }
     final deviceProfileAsync = ref.watch(deviceProfileProvider);
     final defaultHome = ref.watch(
       generalSettingsProvider.select((s) => s.defaultHomeScreen),
@@ -242,7 +271,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
                   // report on a television. Leave the app instead.
                   SystemNavigator.pop();
                 } else {
-                  widget.navigationShell.goBranch(defaultIndex);
+                  _goToBranch(defaultIndex);
                 }
               },
               child: Listener(
@@ -356,7 +385,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
                 // back button leaves the app instead of doing nothing.
                 SystemNavigator.pop();
               } else {
-                widget.navigationShell.goBranch(defaultIndex);
+                _goToBranch(defaultIndex);
               }
             },
             child: Scaffold(

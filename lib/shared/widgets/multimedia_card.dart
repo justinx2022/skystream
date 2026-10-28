@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
+import '../../core/theme/app_world.dart';
+import '../../core/theme/design_tokens.dart';
 import '../../core/utils/image_utils.dart';
 import '../../core/utils/responsive_breakpoints.dart';
 import '../../features/settings/presentation/general_settings_provider.dart';
@@ -59,7 +62,7 @@ class MultimediaCard extends ConsumerWidget {
         return Hero(
           tag: heroTag,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadius.md),
             child: CachedNetworkImage(
               imageUrl: imageUrl ?? '',
               fit: BoxFit.cover,
@@ -77,7 +80,7 @@ class MultimediaCard extends ConsumerWidget {
                     : ImageUtils.backdropAspectRatio,
               ),
               placeholder: (context, url) =>
-                  ShimmerPlaceholder(borderRadius: 12),
+                  ShimmerPlaceholder(borderRadius: AppRadius.md),
               errorWidget: (_, _, _) => ThumbnailErrorPlaceholder(label: title),
             ),
           ),
@@ -85,17 +88,20 @@ class MultimediaCard extends ConsumerWidget {
       },
     );
 
+    final world = AppWorldTokens.colorsOf(context);
     final titleTextStyle = TextStyle(
       color: isInside
-          ? Colors.white
-          : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8),
+          ? world.textPrimary
+          : world.textPrimary.withValues(alpha: 0.88),
       fontSize: isDesktop ? 22 : 14,
-      fontWeight: FontWeight.w500,
+      fontWeight: isInside ? FontWeight.w600 : FontWeight.w500,
+      letterSpacing: -0.1,
+      height: 1.25,
       shadows: isInside
           ? [
               const Shadow(
                 color: Colors.black87,
-                blurRadius: 4,
+                blurRadius: 6,
                 offset: Offset(0, 1),
               ),
             ]
@@ -110,7 +116,7 @@ class MultimediaCard extends ConsumerWidget {
         child: SizedBox(
           width: cardWidth,
           child: isInside
-              ? _buildInsideMode(imageWidget, titleTextStyle)
+              ? _buildInsideMode(context, imageWidget, titleTextStyle)
               : _buildBelowMode(imageWidget, titleTextStyle),
         ),
       ),
@@ -129,11 +135,16 @@ class MultimediaCard extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
           style: titleTextStyle,
         ),
+        const SizedBox(height: 2),
       ],
     );
   }
 
-  Widget _buildInsideMode(Widget imageWidget, TextStyle titleTextStyle) {
+  Widget _buildInsideMode(
+    BuildContext context,
+    Widget imageWidget,
+    TextStyle titleTextStyle,
+  ) {
     return Stack(
       children: [
         Positioned.fill(child: imageWidget),
@@ -142,22 +153,17 @@ class MultimediaCard extends ConsumerWidget {
           right: 0,
           bottom: 0,
           child: Container(
-            decoration: const BoxDecoration(
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(12),
-                bottomRight: Radius.circular(12),
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.only(
+                bottomLeft: Radius.circular(AppRadius.md),
+                bottomRight: Radius.circular(AppRadius.md),
               ),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.transparent, Colors.black87],
-                stops: [0.0, 1.0],
-              ),
+              gradient: AppWorldTokens.colorsOf(context).artworkScrim,
             ),
-            padding: const EdgeInsets.fromLTRB(10, 24, 10, 10),
+            padding: const EdgeInsets.fromLTRB(10, 28, 10, 10),
             child: Text(
               title,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
               style: titleTextStyle,

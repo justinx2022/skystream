@@ -1,10 +1,14 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:skystream/core/utils/layout_constants.dart';
 
+import '../../core/theme/app_world.dart';
+import '../../core/theme/design_tokens.dart';
 import '../focus/app_focus.dart';
 
 /// Global provider to track whether the D-pad/keyboard navigation mode is active.
@@ -120,6 +124,14 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
     });
   }
 
+  BoxDecoration _dockGlass(AppWorldColors world, BorderRadius radius) {
+    return BoxDecoration(
+      color: world.glassFill,
+      borderRadius: radius,
+      border: Border.all(color: world.glassEdge),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -152,13 +164,13 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
     // Top padding = 16.0, Item base size = 40.0, Gap = 16.0
     const unscaledCenters = [36.0, 92.0, 148.0, 204.0, 260.0];
 
-    // Outer container colors matching bg-gray-50 / dark:bg-neutral-900 verbatim
-    final dockBgColor = isDark
-        ? const Color(0xFF171717)
-        : const Color(0xFFF9FAFB);
-    final dockBorderColor = isDark
-        ? const Color(0xFF262626)
-        : const Color(0xFFE5E7EB);
+    // The dock is the app's most visible piece of glass: the world's tint, one
+    // lit edge, and a blur of whatever the branch is painting behind it. The
+    // radius and edge come from the shared tokens so it matches every other
+    // panel.
+    final world = AppWorldTokens.colorsOf(context);
+    final dockRadius = BorderRadius.circular(AppRadius.xl);
+    final reduceMotion = AppMotion.reduced(context);
 
     return Material(
       color: Colors.transparent,
@@ -221,55 +233,70 @@ class _AppSidebarState extends ConsumerState<AppSidebar> {
                 duration: const Duration(milliseconds: 350),
                 curve: const _AceternitySpringCurve(),
                 width: dockWidth,
-                height:
-                    dynamicDockHeight, // Dynamic height scales on the spring curve!
+                height: dynamicDockHeight, // Dynamic height scales on the spring curve!
                 clipBehavior: Clip.none,
                 decoration: BoxDecoration(
-                  color: dockBgColor,
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: dockBorderColor.withValues(alpha: 0.8),
-                    width: 1.0,
-                  ),
+                  borderRadius: dockRadius,
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(
-                        alpha: isDark ? 0.35 : 0.08,
+                        alpha: isDark ? 0.38 : 0.10,
                       ),
-                      blurRadius: 16,
+                      blurRadius: 24,
                       spreadRadius: 0,
-                      offset: const Offset(0, 4),
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
                 child: Stack(
                   clipBehavior: Clip.none,
-                  children: List.generate(destinations.length, (i) {
-                    final (outlinedIcon, filledIcon, label) = destinations[i];
-                    final isSelected = widget.currentIndex == i;
-
-                    return AnimatedPositioned(
-                      key: ValueKey('dock_item_$i'),
-                      duration: const Duration(milliseconds: 350),
-                      curve: const _AceternitySpringCurve(),
-                      left:
-                          12.0, // Fixed left baseline anchors growth horizontally to the right
-                      top: tops[i],
-                      width: itemSizes[i],
-                      height: itemSizes[i],
-                      child: _SidebarDockItem(
-                        focusNode: widget.focusNodes[i],
-                        icon: isSelected ? filledIcon : outlinedIcon,
-                        label: label,
-                        isSelected: isSelected,
-                        iconSize: iconSizes[i],
-                        onTap: () => widget.onItemTapped(i),
-                        index: i,
-                        focusNodes: widget.focusNodes,
-                        isDpadMode: isDpadMode,
+                  children: [
+                    // The pane itself, on its own layer so the tooltips and
+                    // the magnified items may still overflow the dock.
+                    Positioned.fill(
+                      child: ClipRRect(
+                        borderRadius: dockRadius,
+                        child: reduceMotion
+                            ? DecoratedBox(
+                                decoration: _dockGlass(world, dockRadius),
+                              )
+                            : BackdropFilter(
+                                filter: ImageFilter.blur(
+                                  sigmaX: AppBlur.chrome,
+                                  sigmaY: AppBlur.chrome,
+                                ),
+                                child: DecoratedBox(
+                                  decoration: _dockGlass(world, dockRadius),
+                                ),
+                              ),
                       ),
-                    );
-                  }),
+                    ),
+                    ...List.generate(destinations.length, (i) {
+                      final (outlinedIcon, filledIcon, label) = destinations[i];
+                      final isSelected = widget.currentIndex == i;
+
+                      return AnimatedPositioned(
+                        key: ValueKey('dock_item_$i'),
+                        duration: const Duration(milliseconds: 350),
+                        curve: const _AceternitySpringCurve(),
+                        left: 12.0, // Fixed left baseline anchors growth horizontally to the right
+                        top: tops[i],
+                        width: itemSizes[i],
+                        height: itemSizes[i],
+                        child: _SidebarDockItem(
+                          focusNode: widget.focusNodes[i],
+                          icon: isSelected ? filledIcon : outlinedIcon,
+                          label: label,
+                          isSelected: isSelected,
+                          iconSize: iconSizes[i],
+                          onTap: () => widget.onItemTapped(i),
+                          index: i,
+                          focusNodes: widget.focusNodes,
+                          isDpadMode: isDpadMode,
+                        ),
+                      );
+                    }),
+                  ],
                 ),
               ),
             );
@@ -313,27 +340,21 @@ class _SidebarDockItemState extends ConsumerState<_SidebarDockItem> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final world = AppWorldTokens.colorsOf(context);
 
-    // Background color of the items (bg-gray-200 / dark:bg-neutral-800 verbatim, no accent highlight)
-    final itemBgColor = isDark
-        ? const Color(0xFF262626)
-        : const Color(0xFFE5E7EB);
+    // The selected destination is the world's accent; the rest are neutral,
+    // so the dock reads as one rail with a current place in it rather than
+    // five tinted buttons.
+    final itemBgColor = widget.isSelected
+        ? world.accent.withValues(alpha: world.isDark ? 0.18 : 0.14)
+        : world.textPrimary.withValues(alpha: world.isDark ? 0.06 : 0.05);
+    final iconColor = widget.isSelected ? world.accent : world.textSecondary;
 
-    // Icon color of the items (high contrast in both dark and light modes)
-    final iconColor = isDark ? Colors.white : const Color(0xFF171717);
-
-    // Tooltip style color variables (bg-gray-100 / dark:bg-neutral-800 verbatim)
-    final tooltipBgColor = isDark
-        ? const Color(0xFF262626)
-        : const Color(0xFFF3F4F6);
-    final tooltipBorderColor = isDark
-        ? const Color(0xFF171717)
-        : const Color(0xFFE5E7EB);
-    final tooltipTextColor = isDark
-        ? const Color(0xFFFFFFFF)
-        : const Color(0xFF374151);
+    // Tooltips are glass too, so a label hovering beside the dock belongs to
+    // the same material as the dock.
+    final tooltipBgColor = world.elevated;
+    final tooltipBorderColor = world.divider;
+    final tooltipTextColor = world.textPrimary;
 
     final showFocus = showFocusIndicator(context, _isFocused);
     final showTooltip = _isHovered || (_isFocused && widget.isDpadMode);
@@ -380,8 +401,7 @@ class _SidebarDockItemState extends ConsumerState<_SidebarDockItem> {
         child: SizedBox.expand(
           child: Stack(
             clipBehavior: Clip.none,
-            alignment: Alignment
-                .centerLeft, // Centered to the left edge of the animated positioned widget
+            alignment: Alignment.centerLeft, // Centered to the left edge of the animated positioned widget
             children: [
               Positioned(
                 left: 0,
@@ -428,8 +448,7 @@ class _SidebarDockItemState extends ConsumerState<_SidebarDockItem> {
                                   return Icon(
                                     widget.icon,
                                     color: iconColor,
-                                    size:
-                                        animatedIconSize, // Dynamic font size animated on the spring curve
+                                    size: animatedIconSize, // Dynamic font size animated on the spring curve
                                   );
                                 },
                               ),

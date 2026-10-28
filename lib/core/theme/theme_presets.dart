@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_world.dart';
+
 /// The colour family the app's Material 3 scheme is generated from.
 ///
 /// [dynamic] is the wallpaper - the scheme the platform reports - and is the
@@ -180,11 +182,35 @@ class AppSurfaceColors {
 
 /// Resolves [style] against [brightness], with [scheme] supplying the
 /// scheme-derived variant and every text role.
+///
+/// [world] is the surface family the current branch belongs to. [automatic]
+/// now means "the world's own surface" - SKY's midnight blue or GROUND's warm
+/// graphite - instead of one pair for the whole app, which is what makes the
+/// two worlds visible at all. A viewer who picks a surface style explicitly
+/// still gets exactly that style, in either world.
 AppSurfaceColors resolveSurfaceColors({
   required AppSurfaceStyle style,
   required Brightness brightness,
   required ColorScheme scheme,
+  AppWorldColors? world,
 }) {
+  if (style == AppSurfaceStyle.automatic && world != null) {
+    return AppSurfaceColors(
+      scaffold: world.background,
+      surface: world.background,
+      card: world.elevated,
+      dialog: world.elevated,
+      sheet: world.elevated,
+      containerLow: world.background,
+      containerHigh: world.elevatedHigh,
+      containerHighest: world.elevatedHigh,
+      outline: world.divider,
+      outlineVariant: world.elevatedHigh,
+      input: world.elevated,
+      divider: world.divider,
+    );
+  }
+
   final AppSurfaceStyle effective = style == AppSurfaceStyle.automatic
       ? (brightness == Brightness.dark
             ? AppSurfaceStyle.amoled
@@ -355,7 +381,10 @@ class AppSurfaceTokens extends ThemeExtension<AppSurfaceTokens> {
   }
 
   @override
-  AppSurfaceTokens lerp(covariant ThemeExtension<AppSurfaceTokens>? other, double t) {
+  AppSurfaceTokens lerp(
+    covariant ThemeExtension<AppSurfaceTokens>? other,
+    double t,
+  ) {
     if (other is! AppSurfaceTokens) return this;
     return AppSurfaceTokens(
       style: t < 0.5 ? style : other.style,

@@ -795,6 +795,24 @@ abstract class AppLocalizations {
   /// **'Bookmarks'**
   String get bookmarks;
 
+  /// No description provided for @history.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get history;
+
+  /// No description provided for @historyEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing watched yet'**
+  String get historyEmptyTitle;
+
+  /// No description provided for @historyEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Titles you play will appear here, so you can pick them up where you left off.'**
+  String get historyEmptyMessage;
+
   /// No description provided for @noDownloadsYet.
   ///
   /// In en, this message translates to:
@@ -902,6 +920,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your library is empty'**
   String get libraryEmpty;
+
+  /// No description provided for @libraryEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Save a title and it will be waiting here.'**
+  String get libraryEmptyMessage;
 
   /// No description provided for @language.
   ///

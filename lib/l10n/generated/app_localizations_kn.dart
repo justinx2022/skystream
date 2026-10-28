@@ -339,6 +339,16 @@ class AppLocalizationsKn extends AppLocalizations {
   String get bookmarks => 'ಬುಕ್‌ಮಾರ್ಕ್‌ಗಳು';
 
   @override
+  String get history => 'ಇತಿಹಾಸ';
+
+  @override
+  String get historyEmptyTitle => 'ಇನ್ನೂ ಏನನ್ನೂ ವೀಕ್ಷಿಸಿಲ್ಲ';
+
+  @override
+  String get historyEmptyMessage =>
+      'ನೀವು ಪ್ಲೇ ಮಾಡುವ ಶೀರ್ಷಿಕೆಗಳು ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತವೆ, ಇದರಿಂದ ನೀವು ನಿಲ್ಲಿಸಿದ ಸ್ಥಳದಿಂದ ಮುಂದುವರಿಸಬಹುದು.';
+
+  @override
   String get noDownloadsYet => 'ಇನ್ನೂ ಯಾವುದೇ ಡೌನ್‌ಲೋಡ್‌ಗಳಿಲ್ಲ';
 
   @override
@@ -397,6 +407,10 @@ class AppLocalizationsKn extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'ನಿಮ್ಮ ಸಂಗ್ರಹ ಖಾಲಿಯಿದೆ';
+
+  @override
+  String get libraryEmptyMessage =>
+      'ಒಂದು ಶೀರ್ಷಿಕೆಯನ್ನು ಉಳಿಸಿ, ಅದು ಇಲ್ಲಿ ನಿಮಗಾಗಿ ಕಾಯುತ್ತದೆ.';
 
   @override
   String get language => 'ಭಾಷೆ';

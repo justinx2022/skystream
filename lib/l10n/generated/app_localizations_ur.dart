@@ -336,6 +336,16 @@ class AppLocalizationsUr extends AppLocalizations {
   String get bookmarks => 'بک مارکس';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'ابھی تک کوئی ڈاؤن لوڈ نہیں ہے';
 
   @override
@@ -394,6 +404,9 @@ class AppLocalizationsUr extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'آپ کی لائبریری خالی ہے';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'زبان';

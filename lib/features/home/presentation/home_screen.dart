@@ -31,6 +31,7 @@ import 'package:skystream/core/router/app_router.dart';
 import 'delegates/home_search_delegate.dart';
 import '../../../shared/widgets/cards_wrapper.dart';
 import '../../../shared/widgets/custom_widgets.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/shimmer_placeholder.dart';
 import '../../../../core/utils/layout_constants.dart';
 import '../../../../core/utils/responsive_breakpoints.dart';
@@ -485,43 +486,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     AppLocalizations l10n, {
     bool isWidescreen = false,
   }) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.extension_off_rounded,
-            size: 64,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            l10n.selectProviderToStart,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          if (isWidescreen) ...[
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: () => _showProviderSelector(context, ref),
-              icon: const Icon(Icons.extension_rounded),
-              label: const Text('Select Provider'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 14,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(
-                    LayoutConstants.radiusPill,
-                  ),
-                ),
-              ),
-            ),
-          ] else
-            Text(l10n.tapExtensionIcon),
-        ],
-      ),
+    // One state for both layouts. The old mobile branch only told the viewer
+    // to tap an icon; a button is the same instruction, and on a television it
+    // is the only one a remote can follow.
+    return EmptyState(
+      icon: Icons.extension_off_rounded,
+      title: l10n.selectProviderToStart,
+      message: l10n.tapExtensionIcon,
+      actionLabel: l10n.selectProvider,
+      onAction: () => _showProviderSelector(context, ref),
     );
   }
 

@@ -337,6 +337,16 @@ class AppLocalizationsTe extends AppLocalizations {
   String get bookmarks => 'బుక్‌మార్క్‌లు';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'ఇంకా డౌన్‌లోడ్స్ ఏమీ లేవు';
 
   @override
@@ -395,6 +405,9 @@ class AppLocalizationsTe extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'మీ లైబ్రరీ ఖాళీగా ఉంది';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'భాష';

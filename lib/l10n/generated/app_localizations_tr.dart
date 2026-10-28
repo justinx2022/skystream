@@ -336,6 +336,16 @@ class AppLocalizationsTr extends AppLocalizations {
   String get bookmarks => 'Yer İmleri';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Henüz indirme yok';
 
   @override
@@ -394,6 +404,9 @@ class AppLocalizationsTr extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'Kütüphaneniz boş';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Dil';

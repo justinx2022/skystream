@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
+import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/image_fallbacks.dart';
 import '../../../../shared/widgets/thumbnail_error_placeholder.dart';
 import '../../../../shared/widgets/expandable_text.dart';
@@ -160,6 +161,11 @@ class DetailsDesktopHero extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // A short accent rule above the title: the same mark
+                      // every rail heading wears, so a title page is
+                      // recognisably part of the same product.
+                      const SectionRule(width: 28),
+                      const SizedBox(height: AppSpace.md),
                       // Logo or Title
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
@@ -257,8 +263,9 @@ class DetailsDesktopHero extends ConsumerWidget {
       style: TextStyle(
         color: textColor,
         fontSize: 56,
-        fontWeight: FontWeight.bold,
-        height: 1.1,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -1.2,
+        height: 1.05,
       ),
     );
   }

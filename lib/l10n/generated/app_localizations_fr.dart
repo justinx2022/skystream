@@ -338,6 +338,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get bookmarks => 'Favoris';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Aucun téléchargement pour le moment';
 
   @override
@@ -396,6 +406,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'Votre bibliothèque est vide';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Langue';

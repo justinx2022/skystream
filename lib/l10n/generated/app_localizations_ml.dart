@@ -337,6 +337,16 @@ class AppLocalizationsMl extends AppLocalizations {
   String get bookmarks => 'ബുക്ക്മാർക്കുകൾ';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'ഡൗൺലോഡുകളൊന്നുമില്ല';
 
   @override
@@ -395,6 +405,9 @@ class AppLocalizationsMl extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'നിങ്ങളുടെ ലൈബ്രറി ശൂന്യമാണ്';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'ഭാഷ';

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../shared/focus/app_focus.dart';
+import 'app_world.dart';
 import 'theme_presets.dart';
 
 class AppTheme {
@@ -56,36 +57,6 @@ class AppTheme {
   static const Color lightTextSecondary = Color(0xFF5C5C5C); // onSurfaceVariant
   static const Color lightCoral = Color(0xFFC63523); // Coral Accent
 
-  /// The light scheme the app shipped with, used when the wallpaper is not
-  /// available and no palette has been chosen. One literal, so the
-  /// never-opened-the-picker light theme cannot drift.
-  static const ColorScheme _warmLightScheme = ColorScheme.light(
-    primary: lightCoral,
-    onPrimary: Colors.white,
-    primaryContainer: Color(0xFFFFDAD4),
-    onPrimaryContainer: Color(0xFF410001),
-    secondary: Color(0xFF775651),
-    onSecondary: Colors.white,
-    secondaryContainer: lightSurfaceHighlight,
-    onSecondaryContainer: Color(0xFF2C1512),
-    tertiary: lightCoral,
-    onTertiary: Colors.white,
-    tertiaryContainer: Color(0xFFFFDAD4),
-    onTertiaryContainer: Color(0xFF410001),
-    surface: lightBackground,
-    onSurface: lightTextPrimary,
-    onSurfaceVariant: lightTextSecondary,
-    outline: Color(0xFFC9BBA6), // Warm sand outline
-    outlineVariant: Color(0xFFD9C9AE), // Soft warm tan outlineVariant
-    error: Color(0xFFBA1A1A),
-    onError: Colors.white,
-    surfaceContainerLowest: lightSurface,
-    surfaceContainerLow: Color(0xFFF7F3EE),
-    surfaceContainer: Color(0xFFEFEAE2),
-    surfaceContainerHigh: lightSurfaceHighlight,
-    surfaceContainerHighest: Color(0xFFE4D9C8),
-  );
-
   static SnackBarThemeData snackBarThemeFor(ColorScheme colorScheme) {
     final isDark = colorScheme.brightness == Brightness.dark;
     return SnackBarThemeData(
@@ -118,7 +89,9 @@ class AppTheme {
       FilledButtonThemeData(style: ButtonStyle(side: AppFocus.buttonSide(cs)));
 
   static ElevatedButtonThemeData _elevatedButtonTheme(ColorScheme cs) =>
-      ElevatedButtonThemeData(style: ButtonStyle(side: AppFocus.buttonSide(cs)));
+      ElevatedButtonThemeData(
+        style: ButtonStyle(side: AppFocus.buttonSide(cs)),
+      );
 
   static TextButtonThemeData _textButtonTheme(ColorScheme cs) =>
       TextButtonThemeData(style: ButtonStyle(side: AppFocus.buttonSide(cs)));
@@ -148,6 +121,7 @@ class AppTheme {
     AppPalette palette = AppPalette.dynamic,
     AppSurfaceStyle surface = AppSurfaceStyle.automatic,
     AppBackdrop backdrop = AppBackdrop.none,
+    AppWorld world = AppWorld.sky,
   }) {
     return _build(
       brightness: Brightness.dark,
@@ -155,6 +129,7 @@ class AppTheme {
       palette: palette,
       surfaceStyle: surface,
       backdrop: backdrop,
+      world: world,
     );
   }
 
@@ -163,6 +138,7 @@ class AppTheme {
     AppPalette palette = AppPalette.dynamic,
     AppSurfaceStyle surface = AppSurfaceStyle.automatic,
     AppBackdrop backdrop = AppBackdrop.none,
+    AppWorld world = AppWorld.sky,
   }) {
     return _build(
       brightness: Brightness.light,
@@ -170,6 +146,7 @@ class AppTheme {
       palette: palette,
       surfaceStyle: surface,
       backdrop: backdrop,
+      world: world,
     );
   }
 
@@ -178,24 +155,57 @@ class AppTheme {
   /// The wallpaper is passed straight through when the palette is dynamic,
   /// because that scheme is the platform's answer and re-seeding it would
   /// only lose what it said. With no wallpaper - a desktop, a TV, a phone with
-  /// dynamic colour off - dynamic falls back to the pair the app shipped
-  /// with: blue at night, warm coral in daylight.
+  /// dynamic colour off - dynamic now falls back to the *world's* accent:
+  /// SKY's cool blue-white at night, GROUND's champagne. That is the one place
+  /// the pack's accent tokens become the app's primary; a viewer who picks a
+  /// palette, or a phone that reports one, still wins.
   static ColorScheme _schemeFor({
     required Brightness brightness,
     required ColorScheme? dynamicScheme,
     required AppPalette palette,
+    required AppWorldColors world,
   }) {
     if (palette == AppPalette.dynamic) {
       if (dynamicScheme != null) {
         return dynamicScheme.copyWith(brightness: brightness);
       }
-      return brightness == Brightness.dark
-          ? ColorScheme.fromSeed(seedColor: primary, brightness: brightness)
-          : _warmLightScheme;
+      return ColorScheme.fromSeed(
+        seedColor: world.accent,
+        brightness: brightness,
+      ).copyWith(primary: world.accent, onPrimary: world.onAccent);
     }
     return ColorScheme.fromSeed(
       seedColor: palette.seed ?? primary,
       brightness: brightness,
+    );
+  }
+
+  /// The type ramp, recoloured for [world].
+  ///
+  /// Only used when the world owns the text roles - the default palette with
+  /// no wallpaper. An explicit palette keeps the scheme's own tinted type, as
+  /// it always has.
+  static TextTheme _worldTextTheme(TextTheme base, AppWorldColors world) {
+    TextStyle? warm(TextStyle? style) =>
+        style?.copyWith(color: world.textPrimary);
+    TextStyle? cool(TextStyle? style) =>
+        style?.copyWith(color: world.textSecondary);
+    return base.copyWith(
+      displayLarge: warm(base.displayLarge),
+      displayMedium: warm(base.displayMedium),
+      displaySmall: warm(base.displaySmall),
+      headlineLarge: warm(base.headlineLarge),
+      headlineMedium: warm(base.headlineMedium),
+      headlineSmall: warm(base.headlineSmall),
+      titleLarge: warm(base.titleLarge),
+      titleMedium: warm(base.titleMedium),
+      titleSmall: warm(base.titleSmall),
+      bodyLarge: warm(base.bodyLarge),
+      bodyMedium: cool(base.bodyMedium),
+      bodySmall: cool(base.bodySmall),
+      labelLarge: warm(base.labelLarge),
+      labelMedium: cool(base.labelMedium),
+      labelSmall: cool(base.labelSmall),
     );
   }
 
@@ -205,23 +215,29 @@ class AppTheme {
     required AppPalette palette,
     required AppSurfaceStyle surfaceStyle,
     required AppBackdrop backdrop,
+    required AppWorld world,
   }) {
     _registerFontLicence();
     final bool isDark = brightness == Brightness.dark;
+    final worldColors = world.colorsFor(brightness);
+    final ownsText = palette == AppPalette.dynamic && dynamicScheme == null;
     final baseScheme = _schemeFor(
       brightness: brightness,
       dynamicScheme: dynamicScheme,
       palette: palette,
+      world: worldColors,
     );
     final surfaces = resolveSurfaceColors(
       style: surfaceStyle,
       brightness: brightness,
       scheme: baseScheme,
+      world: worldColors,
     );
 
     // The surface roles move to the chosen surface style; every text role
     // stays the scheme's, which is what makes a palette change tint the type
-    // and not only the buttons.
+    // and not only the buttons - unless the world owns the text roles, in
+    // which case the pack's neutral ramp is what the viewer reads.
     final colorScheme = baseScheme.copyWith(
       surface: surfaces.surface,
       surfaceContainerLowest: surfaces.containerLow,
@@ -233,78 +249,89 @@ class AppTheme {
       surfaceBright: surfaces.containerHigh,
       outline: surfaces.outline,
       outlineVariant: surfaces.outlineVariant,
-      onSurface: baseScheme.onSurface,
-      onSurfaceVariant: baseScheme.onSurfaceVariant,
+      onSurface: ownsText ? worldColors.textPrimary : baseScheme.onSurface,
+      onSurfaceVariant: ownsText
+          ? worldColors.textSecondary
+          : baseScheme.onSurfaceVariant,
     );
 
-    final textTheme = ThemeData(
-      brightness: brightness,
-      colorScheme: colorScheme,
-    ).textTheme
-        .apply(fontFamily: fontFamily)
-        .copyWith(
-          displayLarge: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-          ),
-          displayMedium: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-          ),
-          displaySmall: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-          ),
-          headlineMedium: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 24,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.onSurface,
-          ),
-          titleLarge: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.onSurface,
-          ),
-          titleMedium: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.onSurface,
-          ),
-          bodyLarge: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 16,
-            color: colorScheme.onSurface,
-          ),
-          bodyMedium: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 14,
-            color: colorScheme.onSurfaceVariant,
-          ),
-          // Full-strength onSurfaceVariant, never a fraction of it. The old
-          // light literal at 80% measured 3.81:1 and failed AA; the scheme
-          // role at full strength clears every surface this theme paints.
-          bodySmall: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 12,
-            color: colorScheme.onSurfaceVariant,
-          ),
-          labelLarge: TextStyle(
-            fontFamily: fontFamily,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.1,
-            color: colorScheme.onSurface,
-          ),
-        );
+    final baseTextTheme =
+        ThemeData(brightness: brightness, colorScheme: colorScheme).textTheme
+            .apply(fontFamily: fontFamily)
+            .copyWith(
+              displayLarge: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.8,
+                height: 1.1,
+                color: colorScheme.onSurface,
+              ),
+              displayMedium: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 30,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.6,
+                height: 1.12,
+                color: colorScheme.onSurface,
+              ),
+              displaySmall: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+                height: 1.15,
+                color: colorScheme.onSurface,
+              ),
+              headlineMedium: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.3,
+                color: colorScheme.onSurface,
+              ),
+              titleLarge: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+              titleMedium: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
+              ),
+              bodyLarge: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 16,
+                color: colorScheme.onSurface,
+              ),
+              bodyMedium: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 14,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              // Full-strength onSurfaceVariant, never a fraction of it. The old
+              // light literal at 80% measured 3.81:1 and failed AA; the scheme
+              // role at full strength clears every surface this theme paints.
+              bodySmall: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+              ),
+              labelLarge: TextStyle(
+                fontFamily: fontFamily,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.1,
+                color: colorScheme.onSurface,
+              ),
+            );
+
+    final textTheme = ownsText
+        ? _worldTextTheme(baseTextTheme, worldColors)
+        : baseTextTheme;
 
     return ThemeData(
       useMaterial3: true,
@@ -324,6 +351,7 @@ class AppTheme {
           backdrop: backdrop,
           base: surfaces.scaffold,
         ),
+        AppWorldTokens(world: world, colors: worldColors),
       ],
 
       dialogTheme: DialogThemeData(

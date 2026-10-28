@@ -14,6 +14,7 @@ import '../../../../core/network/dio_client_provider.dart';
 import '../../../../core/network/doh_service.dart';
 import '../../../../core/storage/settings_repository.dart';
 import '../../../../core/services/download_service.dart';
+import '../../../../core/theme/app_world.dart';
 import '../../../../core/theme/theme_presets.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/utils/app_utils.dart';
@@ -589,8 +590,9 @@ Widget _buildThemeOption(
 /// Plain megabytes. The buffer holds bytes, so this is the whole truth about
 /// it - how many seconds those buy depends on the bitrate, which is not known
 /// until a stream is open and differs per rendition anyway.
-String formatNetworkBuffer(int megabytes) =>
-    megabytes >= 1024 ? '${megabytes ~/ 1024} GB ($megabytes MB)' : '$megabytes MB';
+String formatNetworkBuffer(int megabytes) => megabytes >= 1024
+    ? '${megabytes ~/ 1024} GB ($megabytes MB)'
+    : '$megabytes MB';
 
 String formatSeekDuration(int seconds, AppLocalizations l10n) {
   if (seconds >= 60) {
@@ -1484,6 +1486,9 @@ class _ThemePickerBodyState extends ConsumerState<_ThemePickerBody> {
       style: style,
       brightness: brightness,
       scheme: scheme,
+      // "Automatic" means the current world's own surface now, so its swatch
+      // has to show that surface rather than the pre-world black or paper.
+      world: AppWorldTokens.colorsOf(context),
     );
     return _PreviewDot(
       decoration: BoxDecoration(
@@ -1507,6 +1512,7 @@ class _ThemePickerBodyState extends ConsumerState<_ThemePickerBody> {
       style: surface,
       brightness: brightness,
       scheme: scheme,
+      world: AppWorldTokens.colorsOf(context),
     ).scaffold;
     final gradient = backdrop.gradientFor(
       brightness: brightness,
@@ -1612,11 +1618,7 @@ class _PreviewDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 16,
-      height: 16,
-      decoration: decoration,
-    );
+    return Container(width: 16, height: 16, decoration: decoration);
   }
 }
 
@@ -1664,7 +1666,8 @@ class _PaletteSwatchState extends State<_PaletteSwatch> {
           )
         : BoxDecoration(shape: BoxShape.circle, color: seed);
     final tickColor =
-        seed == null || ThemeData.estimateBrightnessForColor(seed) == Brightness.dark
+        seed == null ||
+            ThemeData.estimateBrightnessForColor(seed) == Brightness.dark
         ? Colors.white
         : Colors.black;
 
@@ -1747,8 +1750,6 @@ class _AppearanceChip extends StatelessWidget {
     );
   }
 }
-
-
 
 /// Shows a dialog to reset data.
 void showResetDataDialog(BuildContext context, WidgetRef ref) {

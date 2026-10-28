@@ -333,6 +333,16 @@ class AppLocalizationsBe extends AppLocalizations {
   String get bookmarks => 'Закладкі';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Загрузак пакуль няма';
 
   @override
@@ -390,6 +400,9 @@ class AppLocalizationsBe extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'Бібліятэка пустая';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Мова';

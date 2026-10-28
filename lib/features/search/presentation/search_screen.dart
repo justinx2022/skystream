@@ -13,6 +13,7 @@ import 'widgets/search_result_section.dart';
 import 'widgets/search_header_bar.dart';
 import 'widgets/search_suggestion_row.dart';
 import 'widgets/bouncy_entry_animation.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/loading_indicator.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -717,63 +718,27 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final isInputEmpty = _controller.text.trim().isEmpty;
 
     if (query.isEmpty || isInputEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.movie_filter_rounded,
-              size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant
-                  .withValues(alpha: 0.65),
-            ),
-            const SizedBox(height: LayoutConstants.spacingMd),
-            Text(
-              l10n.searchFavoriteContent,
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              l10n.pressSearchOrEnter,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
+      return EmptyState(
+        icon: Icons.movie_filter_rounded,
+        title: l10n.searchFavoriteContent,
+        message: l10n.pressSearchOrEnter,
       );
     }
-    final nativeFont = Theme.of(context).textTheme.bodyLarge?.fontFamily;
     final isWidescreen = context.isTabletOrLarger;
     final imageWidth = isWidescreen ? 320.0 : 200.0;
 
-    // No search results found: display No Results Found text and the image grouped vertically
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            l10n.noResultsFound,
-            style: TextStyle(
-              fontFamily: nativeFont,
-              fontSize: 16.0,
-              fontWeight: FontWeight.w400,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Image.asset(
-            'assets/images/no_results.png',
-            fit: BoxFit.contain,
-            width: imageWidth,
-            // Source is 1613x1929 — 11.9 MB decoded — for an illustration
-            // shown at 320 logical px at most. 640 covers 2x density.
-            cacheWidth: 640,
-            errorBuilder: (context, error, stackTrace) =>
-                const SizedBox.shrink(),
-          ),
-        ],
+    // No search results found: the illustration, then the plain answer.
+    return EmptyState(
+      icon: Icons.search_off_rounded,
+      title: l10n.noResultsFound,
+      artwork: Image.asset(
+        'assets/images/no_results.png',
+        fit: BoxFit.contain,
+        width: imageWidth,
+        // Source is 1613x1929 — 11.9 MB decoded — for an illustration
+        // shown at 320 logical px at most. 640 covers 2x density.
+        cacheWidth: 640,
+        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
       ),
     );
   }

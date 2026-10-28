@@ -11,6 +11,7 @@ import '../../../../shared/widgets/cards_wrapper.dart';
 
 import '../../../../core/utils/responsive_breakpoints.dart';
 import '../../../../shared/widgets/multimedia_card.dart';
+import '../../../../shared/widgets/section_header.dart';
 import '../view_all_screen.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 import '../../../../core/utils/image_utils.dart';
@@ -132,12 +133,30 @@ class _MediaHorizontalListState extends State<MediaHorizontalList> {
     );
   }
 
+  void _openViewAll() {
+    if (widget.onViewAll != null) {
+      widget.onViewAll!();
+      return;
+    }
+    ViewAllRoute(
+      $extra: ViewAllRouteExtra(
+        title: widget.title,
+        initialMediaList: widget.mediaList,
+        category: widget.category,
+        onTap: widget.onTap,
+      ),
+    ).push<void>(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.mediaList.isEmpty) return const SizedBox.shrink();
     final l10n = AppLocalizations.of(context)!;
 
     final isDesktop = context.isDesktop;
+    final horizontal = isDesktop
+        ? LayoutConstants.dashboardContentPadding
+        : LayoutConstants.spacingMd;
 
     final double cardWidth = isDesktop
         ? (_isPortrait ? 200.0 : 300.0)
@@ -149,117 +168,40 @@ class _MediaHorizontalListState extends State<MediaHorizontalList> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header Row
+        // A rail heading: accent rule, title, and the two ways on - arrows for
+        // a pointer, "View all" for everything.
         Padding(
           padding: EdgeInsets.fromLTRB(
-            isDesktop
-                ? LayoutConstants.dashboardContentPadding
-                : LayoutConstants.spacingMd,
+            horizontal,
             LayoutConstants.spacingLg,
-            isDesktop
-                ? LayoutConstants.dashboardContentPadding
-                : LayoutConstants.spacingMd,
+            horizontal,
             LayoutConstants.spacingSm,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Title with Blue Underline Accent
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: isDesktop ? 24 : 20,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      width: isDesktop ? 30 : 20, // Accent width
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primary,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Desktop arrow buttons — before the View All chip
-              if (isDesktop) ...[
-                const SizedBox(width: 8),
-                _HeaderArrowButton(
-                  icon: Icons.arrow_back_ios_new,
-                  onTap: () => _scrollBy(-400),
-                ),
-                const SizedBox(width: 4),
-                _HeaderArrowButton(
-                  icon: Icons.arrow_forward_ios,
-                  onTap: () => _scrollBy(400),
-                ),
-              ],
-
-              if (widget.showViewAll)
-                const SizedBox(width: LayoutConstants.spacingXs),
-
-              if (widget.showViewAll)
-                CardsWrapper(
-                  onTap: () {
-                    if (widget.onViewAll != null) {
-                      widget.onViewAll!();
-                      return;
-                    }
-                    ViewAllRoute(
-                      $extra: ViewAllRouteExtra(
-                        title: widget.title,
-                        initialMediaList: widget.mediaList,
-                        category: widget.category,
-                        onTap: widget.onTap,
-                      ),
-                    ).push<void>(context);
-                  },
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: LayoutConstants.spacingSm,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.onSurface
-                          .withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          l10n.viewAll,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface
-                                .withValues(alpha: 0.7),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_ios,
-                          size: 10,
-                          color: Theme.of(context).colorScheme.onSurface
-                              .withValues(alpha: 0.7),
-                        ),
-                      ],
-                    ),
+          child: SectionHeader(
+            title: widget.title,
+            compact: !isDesktop,
+            action: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isDesktop) ...[
+                  _HeaderArrowButton(
+                    icon: Icons.arrow_back_ios_new,
+                    onTap: () => _scrollBy(-400),
                   ),
-                ),
-            ],
+                  const SizedBox(width: 4),
+                  _HeaderArrowButton(
+                    icon: Icons.arrow_forward_ios,
+                    onTap: () => _scrollBy(400),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (widget.showViewAll)
+                  SectionHeaderAction(
+                    label: l10n.viewAll,
+                    onPressed: _openViewAll,
+                  ),
+              ],
+            ),
           ),
         ),
 

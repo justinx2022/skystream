@@ -336,6 +336,16 @@ class AppLocalizationsHu extends AppLocalizations {
   String get bookmarks => 'Könyvjelzők';
 
   @override
+  String get history => 'History';
+
+  @override
+  String get historyEmptyTitle => 'Nothing watched yet';
+
+  @override
+  String get historyEmptyMessage =>
+      'Titles you play will appear here, so you can pick them up where you left off.';
+
+  @override
   String get noDownloadsYet => 'Még nincsenek letöltések';
 
   @override
@@ -393,6 +403,9 @@ class AppLocalizationsHu extends AppLocalizations {
 
   @override
   String get libraryEmpty => 'A könyvtára üres';
+
+  @override
+  String get libraryEmptyMessage => 'Save a title and it will be waiting here.';
 
   @override
   String get language => 'Nyelv';

@@ -18,6 +18,7 @@ import 'core/theme/theme_provider.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_presets.dart' show AppPalette;
+import 'core/theme/world_provider.dart';
 import 'core/storage/storage_service.dart';
 import 'core/network/doh_service.dart';
 
@@ -454,6 +455,10 @@ class _MyAppState extends ConsumerState<MyApp> {
   Widget build(BuildContext context) {
     final themeMode = ref.watch(appThemeModeProvider);
     final customization = ref.watch(themeCustomizationProvider);
+    // Which world the shell is on. Written by AppScaffold from the branch and
+    // read here so the whole MaterialApp - dialogs and sheets included -
+    // carries the world's surfaces rather than only the branch subtree.
+    final world = ref.watch(appWorldProvider);
     final appRouter = ref.watch(appRouterProvider);
     final locale = ref.watch(localeProvider);
     final profileAsync = ref.watch(deviceProfileProvider);
@@ -489,12 +494,14 @@ class _MyAppState extends ConsumerState<MyApp> {
             palette: customization.palette,
             surface: customization.surface,
             backdrop: customization.backdrop,
+            world: world,
           ),
           darkTheme: AppTheme.createDarkTheme(
             darkScheme,
             palette: customization.palette,
             surface: customization.surface,
             backdrop: customization.backdrop,
+            world: world,
           ),
           routerConfig: appRouter,
           locale: locale,

@@ -8,6 +8,7 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/utils/image_fallbacks.dart';
 import '../../../../core/utils/layout_constants.dart';
 import '../../../../core/utils/responsive_breakpoints.dart';
+import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/multimedia_card.dart';
 import '../library_provider.dart';
 
@@ -175,9 +176,7 @@ class _BookmarksTabState extends ConsumerState<BookmarksTab>
           LayoutConstants.spacingMd,
           LayoutConstants.spacingMd,
           0,
-        ).copyWith(
-          bottom: LayoutConstants.shellBottomContentPadding(context),
-        ),
+        ).copyWith(bottom: LayoutConstants.shellBottomContentPadding(context)),
         gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: totalHeight,
           childAspectRatio: 2 / 3.4,
@@ -205,24 +204,13 @@ class _BookmarksTabState extends ConsumerState<BookmarksTab>
   }
 
   Widget _buildEmpty(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.bookmark_outline_rounded,
-            size: 64,
-            color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(
-              alpha: 0.6,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            AppLocalizations.of(context)!.libraryEmpty,
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-        ],
-      ),
+    final l10n = AppLocalizations.of(context)!;
+    return EmptyState(
+      icon: Icons.bookmark_outline_rounded,
+      title: l10n.libraryEmpty,
+      message: l10n.libraryEmptyMessage,
+      actionLabel: l10n.explore,
+      onAction: () => const ExploreRoute().go(context),
     );
   }
 }

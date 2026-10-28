@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_world.dart';
+import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/layout_constants.dart';
 import '../../../../shared/focus/app_focus.dart';
 
@@ -10,11 +12,10 @@ class SettingsGroup extends StatelessWidget {
   /// Whether the rows sit on a card of their own.
   ///
   /// True on the Settings page, where the card is what separates a group from
-  /// the scaffold behind it. False inside a dialog: the card fills with
-  /// [ColorScheme.surface], which the dark theme pins to pure black, so on a
-  /// dialog's own surface it reads as a black box floating in a grey panel
-  /// rather than as a group. The tiles keep their dividers either way, which
-  /// is what actually groups them.
+  /// the scaffold behind it. False inside a dialog: the card fills with the
+  /// raised surface, which on a dialog's own surface reads as a box floating in
+  /// a panel rather than as a group. The tiles keep their dividers either way,
+  /// which is what actually groups them.
   final bool filled;
 
   const SettingsGroup({
@@ -26,6 +27,7 @@ class SettingsGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final world = AppWorldTokens.colorsOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -34,12 +36,22 @@ class SettingsGroup extends StatelessWidget {
             horizontal: LayoutConstants.spacingMd,
             vertical: LayoutConstants.spacingSm,
           ),
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: world.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         Container(
@@ -48,11 +60,15 @@ class SettingsGroup extends StatelessWidget {
           ),
           decoration: filled
               ? BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Theme.of(context).dividerColor),
+                  // The raised surface, not the page colour: in the world
+                  // theme `surface` is the page, and a group painted with it
+                  // would be a card you cannot see.
+                  color: world.elevated,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: world.divider),
                 )
               : null,
+          clipBehavior: filled ? Clip.antiAlias : Clip.none,
           child: Column(children: children),
         ),
       ],
@@ -91,7 +107,8 @@ class _SettingsTileState extends State<SettingsTile> {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary = AppWorldTokens.colorsOf(context).accent;
+    final world = AppWorldTokens.colorsOf(context);
     final showFocus = showFocusIndicator(context, _isFocused);
     return Column(
       children: [
@@ -146,8 +163,8 @@ class _SettingsTileState extends State<SettingsTile> {
                 leading: Container(
                   padding: const EdgeInsets.all(LayoutConstants.spacingXs),
                   decoration: BoxDecoration(
-                    color: primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    color: primary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
                   child: Icon(widget.icon, color: primary, size: 20),
                 ),
@@ -168,14 +185,13 @@ class _SettingsTileState extends State<SettingsTile> {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary
-                              .withValues(alpha: 0.2),
+                          color: primary.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           "BETA",
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
+                            color: primary,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
@@ -231,12 +247,7 @@ class _SettingsTileState extends State<SettingsTile> {
           ),
         ),
         if (!widget.isLast && !showFocus)
-          Divider(
-            height: 1,
-            indent: 56,
-            endIndent: 16,
-            color: Theme.of(context).dividerColor.withValues(alpha: 0.8),
-          ),
+          Divider(height: 1, indent: 56, endIndent: 16, color: world.divider),
       ],
     );
   }

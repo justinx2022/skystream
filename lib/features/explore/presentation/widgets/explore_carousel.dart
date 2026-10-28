@@ -10,6 +10,8 @@ import 'package:visibility_detector/visibility_detector.dart';
 
 import '../../../../core/utils/image_utils.dart';
 import '../../../../core/utils/layout_constants.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_world.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -554,6 +556,16 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
   }) {
     final imageUrl = movie.backdropImageUrl;
     final title = movie.title;
+    final world = AppWorldTokens.colorsOf(context);
+
+    // The scrim is the world's page colour, darkened, rather than pure black:
+    // a SKY hero settles into midnight blue and a GROUND hero into graphite,
+    // so the slide belongs to the page it scrolls into. Black is still mixed
+    // in underneath, because artwork needs a neutral shadow to sit on.
+    final shade = Color.alphaBlend(
+      world.background.withValues(alpha: 0.5),
+      Colors.black,
+    );
 
     const bleed = 60.0;
 
@@ -609,16 +621,16 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
                   end: Alignment.bottomCenter,
                   colors: isDesktop
                       ? [
-                          Colors.black.withValues(alpha: 0.2),
+                          shade.withValues(alpha: 0.30),
                           Colors.transparent,
-                          Colors.black.withValues(alpha: 0.45),
-                          Colors.black.withValues(alpha: 0.75),
+                          shade.withValues(alpha: 0.58),
+                          shade.withValues(alpha: 0.88),
                         ]
                       : [
-                          Colors.black.withValues(alpha: 0.3),
+                          shade.withValues(alpha: 0.42),
                           Colors.transparent,
-                          Colors.black.withValues(alpha: 0.4),
-                          Colors.black.withValues(alpha: 0.8),
+                          shade.withValues(alpha: 0.55),
+                          shade.withValues(alpha: 0.92),
                         ],
                   stops: isDesktop
                       ? const [0.0, 0.35, 0.75, 1.0]
@@ -808,12 +820,16 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
         maxLines: isDesktop ? 2 : 3,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
-          color: Colors.white,
+          // Over artwork, in either world, the title is near-white. The
+          // bundled family, not a Roboto variant the bundle does not contain:
+          // that name was resolving to whatever the platform had.
+          color: Color(0xFFF7F9FC),
           fontSize: 40,
-          fontFamily: 'RobotoCondensed',
-          fontWeight: FontWeight.w900,
-          letterSpacing: 1.0,
-          shadows: [Shadow(color: Colors.black, blurRadius: 10)],
+          fontFamily: AppTheme.fontFamily,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.6,
+          height: 1.05,
+          shadows: [Shadow(color: Colors.black87, blurRadius: 12)],
         ),
       ),
     );
@@ -825,16 +841,15 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
     bool isProvider = false,
   }) {
     final theme = Theme.of(context);
-    final color = isProvider
-        ? theme.colorScheme.primary
-        : theme.colorScheme.secondary;
+    final world = AppWorldTokens.colorsOf(context);
+    final color = isProvider ? world.accent : world.textSecondary;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: Colors.black.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.5), width: 0.5),
+        border: Border.all(color: color.withValues(alpha: 0.6), width: 0.5),
       ),
       child: Text(
         label,
@@ -915,6 +930,7 @@ class _ProgressDotState extends State<_ProgressDot>
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppWorldTokens.colorsOf(context).accent;
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -940,7 +956,7 @@ class _ProgressDotState extends State<_ProgressDot>
                         child: Container(
                           width: _activeWidth * widget.fillController.value,
                           height: _height,
-                          color: Colors.white.withValues(alpha: 0.9),
+                          color: accent,
                         ),
                       );
                     },

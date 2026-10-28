@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../../../shared/widgets/thumbnail_error_placeholder.dart';
 import '../../../../core/models/tmdb_details.dart';
 import '../../../../core/storage/history_repository.dart';
+import '../../../../core/theme/design_tokens.dart';
 import 'provider_search_section.dart';
 
 /// Vertical gap between the content groups of a details page - genres to the
@@ -152,6 +153,8 @@ class TmdbDetailsDesktopHero extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const SectionRule(width: 28),
+                      const SizedBox(height: AppSpace.md),
                       if (logoUrl != null)
                         CachedNetworkImage(
                           imageUrl: logoUrl,
@@ -163,8 +166,9 @@ class TmdbDetailsDesktopHero extends ConsumerWidget {
                             style: TextStyle(
                               color: textColor,
                               fontSize: 56,
-                              fontWeight: FontWeight.bold,
-                              height: 1.1,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -1.2,
+                              height: 1.05,
                             ),
                           ),
                         )
@@ -174,8 +178,9 @@ class TmdbDetailsDesktopHero extends ConsumerWidget {
                           style: TextStyle(
                             color: textColor,
                             fontSize: 56,
-                            fontWeight: FontWeight.bold,
-                            height: 1.1,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -1.2,
+                            height: 1.05,
                           ),
                         ),
                       const SizedBox(height: 12),

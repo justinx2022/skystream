@@ -1,9 +1,12 @@
 import 'dart:math' as math;
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
 
+import '../../core/theme/app_world.dart';
+import '../../core/theme/design_tokens.dart';
 import '../focus/app_focus.dart';
 
 class CustomBottomNavBar extends StatelessWidget {
@@ -53,9 +56,8 @@ class CustomBottomNavBar extends StatelessWidget {
       ),
     ];
 
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final world = AppWorldTokens.colorsOf(context);
     final count = destinations.length;
 
     // Sliding highlight indicator
@@ -72,7 +74,7 @@ class CustomBottomNavBar extends StatelessWidget {
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular((height - 12) / 2),
-              color: colorScheme.primary.withValues(alpha: 0.15),
+              color: world.accent.withValues(alpha: world.isDark ? 0.20 : 0.16),
             ),
           ),
         ),
@@ -96,6 +98,17 @@ class CustomBottomNavBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final fullWidth = constraints.maxWidth.clamp(0.0, 420.0);
+        final surface = Container(
+          height: height,
+          color: world.glassFill,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              highlight,
+              Row(children: tabs),
+            ],
+          ),
+        );
         return Align(
           alignment: Alignment.bottomCenter,
           heightFactor: 1,
@@ -103,12 +116,7 @@ class CustomBottomNavBar extends StatelessWidget {
             width: fullWidth,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(height / 2),
-              border: Border.all(
-                color: isDark
-                    ? theme.dividerColor.withValues(alpha: 0.3)
-                    : colorScheme.outline.withValues(alpha: 0.15),
-                width: 1,
-              ),
+              border: Border.all(color: world.glassEdge, width: 1),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
@@ -119,20 +127,15 @@ class CustomBottomNavBar extends StatelessWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(height / 2),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                child: Container(
-                  height: height,
-                  color: colorScheme.surface.withValues(alpha: 0.8),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      highlight,
-                      Row(children: tabs),
-                    ],
-                  ),
-                ),
-              ),
+              child: AppMotion.reduced(context)
+                  ? surface
+                  : BackdropFilter(
+                      filter: ImageFilter.blur(
+                        sigmaX: AppBlur.chrome,
+                        sigmaY: AppBlur.chrome,
+                      ),
+                      child: surface,
+                    ),
             ),
           ),
         );
@@ -162,6 +165,7 @@ class _NavTabCellState extends State<_NavTabCell> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final world = AppWorldTokens.colorsOf(context);
 
     return Semantics(
       button: true,
@@ -193,9 +197,7 @@ class _NavTabCellState extends State<_NavTabCell> {
                   widget.isSelected
                       ? widget.destination.selectedIcon
                       : widget.destination.icon,
-                  color: widget.isSelected
-                      ? colorScheme.primary
-                      : colorScheme.onSurfaceVariant,
+                  color: widget.isSelected ? world.accent : world.textSecondary,
                   size: 24,
                 ),
               ),

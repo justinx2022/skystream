@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:skystream/core/utils/image_fallbacks.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/services/download_service.dart';
 import '../../../../core/utils/layout_constants.dart';
 import '../../../details/presentation/playback_launcher.dart';
@@ -15,6 +16,7 @@ import '../downloads_provider.dart';
 import '../../../../l10n/generated/app_localizations.dart';
 import '../../../../core/services/notification_service.dart';
 import '../../../../core/utils/file_size_formatter.dart';
+import '../../../../shared/widgets/empty_state.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
 
 class DownloadsTab extends ConsumerStatefulWidget {
@@ -65,23 +67,12 @@ class _DownloadsTabState extends ConsumerState<DownloadsTab>
     return downloadsAsync.when(
       data: (downloads) {
         if (downloads.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.download_for_offline_outlined,
-                  size: 64,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.6),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  l10n.noDownloadsYet,
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ],
-            ),
+          return EmptyState(
+            icon: Icons.download_for_offline_outlined,
+            title: l10n.noDownloadsYet,
+            message: l10n.libraryEmptyMessage,
+            actionLabel: l10n.explore,
+            onAction: () => const ExploreRoute().go(context),
           );
         }
 
