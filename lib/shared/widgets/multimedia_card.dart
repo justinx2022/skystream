@@ -61,27 +61,44 @@ class MultimediaCard extends ConsumerWidget {
             : cardWidth;
         return Hero(
           tag: heroTag,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            child: CachedNetworkImage(
-              imageUrl: imageUrl ?? '',
-              fit: BoxFit.cover,
-              width: double.infinity,
-              // Without this the source decodes whole: a `w780` TV/desktop
-              // poster is 780x1170 = 3.65 MB of bitmap for a card painted
-              // 400 px wide, and a plugin that serves a 2000x3000 poster is
-              // 24 MB — half the 50 MB image cache for one card.
-              memCacheWidth: ImageUtils.coverDecodeWidth(
-                context,
-                width: boxWidth,
-                height: constraints.maxHeight,
-                sourceAspectRatio: isPortrait
-                    ? ImageUtils.posterAspectRatio
-                    : ImageUtils.backdropAspectRatio,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.10),
+                width: 0.75,
               ),
-              placeholder: (context, url) =>
-                  ShimmerPlaceholder(borderRadius: AppRadius.md),
-              errorWidget: (_, _, _) => ThumbnailErrorPlaceholder(label: title),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.md - 0.75),
+              child: CachedNetworkImage(
+                imageUrl: imageUrl ?? '',
+                fit: BoxFit.cover,
+                width: double.infinity,
+                // Without this the source decodes whole: a `w780` TV/desktop
+                // poster is 780x1170 = 3.65 MB of bitmap for a card painted
+                // 400 px wide, and a plugin that serves a 2000x3000 poster is
+                // 24 MB — half the 50 MB image cache for one card.
+                memCacheWidth: ImageUtils.coverDecodeWidth(
+                  context,
+                  width: boxWidth,
+                  height: constraints.maxHeight,
+                  sourceAspectRatio: isPortrait
+                      ? ImageUtils.posterAspectRatio
+                      : ImageUtils.backdropAspectRatio,
+                ),
+                placeholder: (context, url) =>
+                    ShimmerPlaceholder(borderRadius: AppRadius.md),
+                errorWidget: (_, _, _) =>
+                    ThumbnailErrorPlaceholder(label: title),
+              ),
             ),
           ),
         );

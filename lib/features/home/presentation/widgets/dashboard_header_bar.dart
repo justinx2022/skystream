@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:skystream/core/utils/layout_constants.dart';
+import 'package:skystream/core/theme/app_world.dart';
 import 'package:skystream/core/extensions/extension_manager.dart';
 import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:skystream/shared/widgets/cards_wrapper.dart';
@@ -33,10 +34,10 @@ class DashboardHeaderBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context)!;
     final activeProvider = ref.watch(activeProviderProvider);
 
+    final colors = AppWorldTokens.colorsOf(context);
     final hasCarousel = onPrevious != null && onNext != null;
 
     return Container(
@@ -55,12 +56,20 @@ class DashboardHeaderBar extends ConsumerWidget {
               width: 32,
               height: 32,
               alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: colors.elevated.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.10),
+                  width: 0.75,
+                ),
+              ),
               child: Icon(
                 Icons.arrow_back_ios_new,
                 size: 14,
                 color: hasCarousel
-                    ? theme.colorScheme.onSurface
-                    : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    ? colors.textPrimary
+                    : colors.textSecondary.withValues(alpha: 0.3),
               ),
             ),
           ),
@@ -73,12 +82,20 @@ class DashboardHeaderBar extends ConsumerWidget {
               width: 32,
               height: 32,
               alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: colors.elevated.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.10),
+                  width: 0.75,
+                ),
+              ),
               child: Icon(
                 Icons.arrow_forward_ios,
                 size: 14,
                 color: hasCarousel
-                    ? theme.colorScheme.onSurface
-                    : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    ? colors.textPrimary
+                    : colors.textSecondary.withValues(alpha: 0.3),
               ),
             ),
           ),
@@ -106,11 +123,13 @@ class DashboardHeaderBar extends ConsumerWidget {
                 constraints: const BoxConstraints(maxWidth: 500),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.5,
-                  ),
+                  color: colors.elevated.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(
                     LayoutConstants.radiusPill,
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    width: 0.75,
                   ),
                 ),
                 child: Row(
@@ -118,7 +137,7 @@ class DashboardHeaderBar extends ConsumerWidget {
                     Icon(
                       Icons.search,
                       size: 18,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: colors.textSecondary,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -126,7 +145,7 @@ class DashboardHeaderBar extends ConsumerWidget {
                         '${l10n.search}...',
                         style: TextStyle(
                           fontSize: 13,
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: colors.textSecondary,
                         ),
                       ),
                     ),
@@ -149,13 +168,15 @@ class DashboardHeaderBar extends ConsumerWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: theme.colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.3,
+                color: colors.elevated.withValues(alpha: 0.5),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.10),
+                  width: 0.75,
                 ),
               ),
               child: Icon(
                 Icons.refresh,
-                color: theme.colorScheme.onSurfaceVariant,
+                color: colors.textSecondary,
                 size: 18,
               ),
             ),
@@ -170,18 +191,14 @@ class DashboardHeaderBar extends ConsumerWidget {
               children: [
                 Icon(
                   Icons.extension,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.white
-                      : Colors.black,
+                  color: colors.textPrimary,
                   size: 16,
                 ),
                 const SizedBox(width: 8),
                 Text(
                   activeProvider?.name ?? l10n.none,
                   style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.white
-                        : Colors.black,
+                    color: colors.textPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),

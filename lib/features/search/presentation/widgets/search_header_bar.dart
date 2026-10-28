@@ -8,6 +8,7 @@ import '../search_provider.dart';
 import '../../../../shared/widgets/loading_indicator.dart';
 import '../../../../shared/widgets/cards_wrapper.dart';
 import '../../../../shared/focus/app_focus.dart';
+import '../../../../core/theme/app_world.dart';
 
 /// The Live TV glyph: three bars of different heights, standing still.
 ///
@@ -432,14 +433,24 @@ class _SearchHeaderBarState extends ConsumerState<SearchHeaderBar> {
                         height: SearchHeaderBar.kFieldHeight,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(24),
-                          color: theme.colorScheme.surfaceContainerHighest
-                              .withValues(alpha: 0.3),
+                          color: AppWorldTokens.colorsOf(context)
+                              .elevated
+                              .withValues(alpha: isDark ? 0.50 : 0.65),
                           border: Border.all(
                             color: isDark
                                 ? Colors.white.withValues(alpha: 0.12)
                                 : theme.colorScheme.outlineVariant,
-                            width: 1.2,
+                            width: 0.75,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isDark ? 0.20 : 0.05,
+                              ),
+                              blurRadius: 12,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
                         ),
                         child: ValueListenableBuilder<TextEditingValue>(
                           valueListenable: widget.textController,

@@ -111,13 +111,23 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       );
     }
 
+    final world = AppWorldTokens.colorsOf(context);
+
     // Mobile layout: existing AppBar with TabBar
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: Text(AppLocalizations.of(context)!.library),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         bottom: TabBar(
           controller: _tabController,
+          indicatorColor: world.accent,
+          indicatorWeight: 2.5,
+          indicatorSize: TabBarIndicatorSize.label,
+          labelColor: world.accent,
+          unselectedLabelColor: world.textSecondary,
+          dividerColor: world.divider.withValues(alpha: 0.3),
           tabs: [
             Tab(
               text: AppLocalizations.of(context)!.downloads,

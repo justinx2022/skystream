@@ -2,6 +2,7 @@ import 'package:dpad/dpad.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/utils/layout_constants.dart';
+import '../../../../core/theme/app_world.dart';
 import '../../../../shared/focus/app_focus.dart';
 
 /// The chrome shared by the two source-discovery blocks on a details screen.
@@ -84,6 +85,8 @@ class SourceSectionCard extends StatelessWidget {
 
     if (compact) return column;
 
+    final world = AppWorldTokens.colorsOf(context);
+
     return Container(
       width: double.infinity,
       constraints: minHeight == null
@@ -91,9 +94,20 @@ class SourceSectionCard extends StatelessWidget {
           : BoxConstraints(minHeight: minHeight!),
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.3),
+        color: world.elevated.withValues(alpha: world.isDark ? 0.45 : 0.65),
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: cs.outline.withValues(alpha: 0.1)),
+        border: Border.all(
+          color: (world.isDark ? Colors.white : Colors.black)
+              .withValues(alpha: world.isDark ? 0.08 : 0.06),
+          width: 0.75,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: world.isDark ? 0.18 : 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       padding: const EdgeInsets.symmetric(vertical: LayoutConstants.spacingMd),
       child: column,

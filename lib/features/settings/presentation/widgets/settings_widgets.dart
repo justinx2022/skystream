@@ -60,12 +60,25 @@ class SettingsGroup extends StatelessWidget {
           ),
           decoration: filled
               ? BoxDecoration(
-                  // The raised surface, not the page colour: in the world
-                  // theme `surface` is the page, and a group painted with it
-                  // would be a card you cannot see.
-                  color: world.elevated,
+                  // Translucent warm elevated surface with fine luminous edge
+                  color: world.elevated.withValues(
+                    alpha: world.isDark ? 0.70 : 0.85,
+                  ),
                   borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: world.divider),
+                  border: Border.all(
+                    color: (world.isDark ? Colors.white : Colors.black)
+                        .withValues(alpha: world.isDark ? 0.08 : 0.06),
+                    width: 0.75,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: world.isDark ? 0.18 : 0.04,
+                      ),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 )
               : null,
           clipBehavior: filled ? Clip.antiAlias : Clip.none,

@@ -16,6 +16,8 @@ import '../../../../core/theme/app_world.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/thumbnail_error_placeholder.dart';
+import '../../../../shared/widgets/cinema_badge.dart';
+import '../../../../shared/widgets/glass_action_button.dart';
 import '../../../../core/domain/entity/multimedia_item.dart';
 
 /// Lightweight controller for the hero carousel.
@@ -741,45 +743,71 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
           alignment: isDesktop ? WrapAlignment.start : WrapAlignment.center,
           crossAxisAlignment: WrapCrossAlignment.center,
           spacing: 8.0,
-          runSpacing: 4.0,
+          runSpacing: 6.0,
           children: [
-            if (provider != null && provider.isNotEmpty) ...[
-              _buildMiniBadge(
-                context,
-                provider.toUpperCase(),
-                isProvider: true,
+            if (provider != null && provider.isNotEmpty)
+              CinemaBadge(
+                label: provider.toUpperCase(),
+                isAccent: true,
+                fontSize: 10,
               ),
-            ],
-            if (type != null) ...[_buildMiniBadge(context, type.toUpperCase())],
-            if (genres.isNotEmpty) ...[
-              Text(
-                genres,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.7),
+            if (type != null)
+              CinemaBadge(
+                label: type.toUpperCase(),
+                fontSize: 10,
+              ),
+            if (year.isNotEmpty)
+              CinemaBadge(
+                label: year,
+                icon: Icons.calendar_today_rounded,
+                fontSize: 10,
+              ),
+            if (genres.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Text(
+                  genres,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.75),
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
-            ],
-            if (year.isNotEmpty) ...[
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.calendar_today_rounded,
-                    size: 10,
-                    color: Colors.white.withValues(alpha: 0.6),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    year,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: isDesktop
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
+          children: [
+            GlassActionButton(
+              label: 'Watch Now',
+              icon: Icons.play_arrow_rounded,
+              primary: true,
+              onPressed: () {
+                if (widget.onTap != null) {
+                  widget.onTap!(movie);
+                } else {
+                  _navigateToDetails(context, movie);
+                }
+              },
+            ),
+            const SizedBox(width: 12),
+            GlassActionButton(
+              label: 'More Info',
+              icon: Icons.info_outline_rounded,
+              onPressed: () {
+                if (widget.onTap != null) {
+                  widget.onTap!(movie);
+                } else {
+                  _navigateToDetails(context, movie);
+                }
+              },
+            ),
           ],
         ),
       ],
@@ -830,34 +858,6 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
           letterSpacing: -0.6,
           height: 1.05,
           shadows: [Shadow(color: Colors.black87, blurRadius: 12)],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMiniBadge(
-    BuildContext context,
-    String label, {
-    bool isProvider = false,
-  }) {
-    final theme = Theme.of(context);
-    final world = AppWorldTokens.colorsOf(context);
-    final color = isProvider ? world.accent : world.textSecondary;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withValues(alpha: 0.6), width: 0.5),
-      ),
-      child: Text(
-        label,
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: color,
-          fontSize: 8,
-          fontWeight: FontWeight.w900,
-          letterSpacing: 0.5,
         ),
       ),
     );

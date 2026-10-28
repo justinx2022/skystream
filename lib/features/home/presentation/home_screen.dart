@@ -205,13 +205,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 );
               },
               borderRadius: BorderRadius.circular(50),
-              child: CircleAvatar(
-                backgroundColor: Theme.of(context).colorScheme.onSurface
-                    .withValues(alpha: 0.1),
-                radius: 18,
-                child: Icon(
+              child: Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.35),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    width: 0.75,
+                  ),
+                ),
+                child: const Icon(
                   Icons.search,
-                  color: Theme.of(context).colorScheme.onSurface,
+                  color: Colors.white,
                   size: 18,
                 ),
               ),
@@ -234,23 +242,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     height: 36,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.onSurface
-                          .withValues(alpha: 0.1),
+                      color: Colors.black.withValues(alpha: 0.35),
                       borderRadius: BorderRadius.circular(50),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        width: 0.75,
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.extension,
-                          color: Theme.of(context).colorScheme.onSurface,
+                          color: Colors.white,
                           size: 16,
                         ),
                         const SizedBox(width: 6),
                         Text(
                           activeProvider?.name ?? l10n.none,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
+                          style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),

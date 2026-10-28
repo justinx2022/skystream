@@ -23,6 +23,8 @@ import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:skystream/core/services/notification_service.dart';
 
 import '../../../../shared/focus/app_focus.dart';
+import '../../../../shared/widgets/cinema_badge.dart';
+import '../../../../core/theme/app_world.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 
 class ContinueWatchingCard extends ConsumerStatefulWidget {
@@ -498,41 +500,51 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
                 ),
 
                 // Duration badge (top-right).
-                //
-                // Up here rather than in the bottom-right corner it used to
-                // share with the title: the two were competing for the same
-                // strip of scrim, and the title had to hold a 28 dp foot to
-                // stay clear of it. Its own 70% black pill is what carries it,
-                // so it needs no scrim of its own on bare artwork.
                 if (!isLivestream)
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.70),
-                        borderRadius: BorderRadius.circular(
-                          LayoutConstants.radiusMd,
+                    child: CinemaBadge(
+                      label:
+                          '${_formatDuration(widget.historyItem.position)} / ${_formatDuration(widget.historyItem.duration)}',
+                      fontSize: 9,
+                    ),
+                  ),
+
+                // Center Quick Play Icon on Attention
+                if (_isAttended)
+                  Positioned.fill(
+                    child: Center(
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                            width: 1.2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppWorldTokens.colorsOf(
+                                context,
+                              ).accent.withValues(alpha: 0.3),
+                              blurRadius: 16,
+                              spreadRadius: 1,
+                            ),
+                          ],
                         ),
-                      ),
-                      child: Text(
-                        '${_formatDuration(widget.historyItem.position)} / ${_formatDuration(widget.historyItem.duration)}',
-                        style: const TextStyle(
+                        child: const Icon(
+                          Icons.play_arrow_rounded,
                           color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
+                          size: 26,
                         ),
                       ),
                     ),
                   ),
 
-                // Resume gauge (bottom edge). Track and fill, see
-                // _progressTrackOpacity — a fill on a transparent track is a
-                // sliver, not a gauge.
+                // Resume gauge (bottom edge). Track and fill with world accent.
                 Positioned(
                   bottom: 0,
                   left: 0,
@@ -545,8 +557,8 @@ class _ContinueWatchingCardState extends ConsumerState<ContinueWatchingCard> {
                         backgroundColor: Colors.white.withValues(
                           alpha: _progressTrackOpacity,
                         ),
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          Colors.white,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          AppWorldTokens.colorsOf(context).accent,
                         ),
                       ),
                     ),
