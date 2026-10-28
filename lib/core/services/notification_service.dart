@@ -5,14 +5,17 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 part 'notification_service.g.dart';
 
 @Riverpod(keepAlive: true)
-// A service object: widgets listen to it directly (the ListenableBuilder in
-// m3_toast_overlay.dart), and the provider only hands it out.
-// ignore: riverpod_lint/unsupported_provider_value
 NotificationService notificationService(Ref ref) {
   return NotificationService();
 }
 
 enum ToastType { info, success, error, extension }
+
+/// [ChangeNotifier] only exposes `notifyListeners` to its own subclasses, so
+/// the one call site gets a name it is allowed to use.
+class _NotificationListeners extends ChangeNotifier {
+  void emit() => notifyListeners();
+}
 
 class ToastItem {
   final String id;
@@ -42,7 +45,31 @@ class ToastItem {
 
 /// A global service to manage UI notifications (Material 3 Expressive Toasts & SnackBars)
 /// without needing a [BuildContext].
-class NotificationService extends ChangeNotifier {
+///
+/// A [Listenable], not a [ChangeNotifier], even though the listener set is a
+/// ChangeNotifier underneath. riverpod_lint's unsupported_provider_value
+/// reports on a provider that hands out a ChangeNotifier, and reporting it
+/// crashes the analysis server against analyzer 14.4.0 - the lint passes a
+/// message argument the registered message does not take - so a type that is
+/// not one keeps `dart analyze` working. Every caller only ever needed to
+/// listen, and that is unchanged.
+class NotificationService implements Listenable {
+  final _NotificationListeners _listeners = _NotificationListeners();
+
+  @override
+  void addListener(VoidCallback listener) => _listeners.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _listeners.removeListener(listener);
+
+  void notifyListeners() => _listeners.emit();
+
+  /// Drops every listener. Left as a public method because
+  /// [ChangeNotifier.dispose] used to be inherited; nothing in the app calls
+  /// it, a test does.
+  void dispose() => _listeners.dispose();
+
   final GlobalKey<ScaffoldMessengerState> messengerKey =
       GlobalKey<ScaffoldMessengerState>();
 
