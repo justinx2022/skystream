@@ -196,6 +196,58 @@ void main() {
         expect(mb, bufferDurationToMb(durationMinutes: 10, tier: DeviceTier.high));
       });
     });
+
+    // mpv splits the one choice three ways, and the smallest wins silently.
+    // These are the two derivations the MediaKit engine had hardcoded instead:
+    // a minute of read-ahead and a twelve-minute cache cap.
+    group('what the mpv cache does with that choice', () {
+      test('a chosen duration is the read-ahead, in seconds', () {
+        expect(resolveReadAheadSeconds(90, DeviceTier.low), 5400);
+        expect(resolveReadAheadSeconds(2, DeviceTier.high), 120);
+      });
+
+      test('no duration falls to what the settings row already shows', () {
+        for (final tier in DeviceTier.values) {
+          expect(
+            resolveReadAheadSeconds(null, tier),
+            defaultBufferDurationMinutes(tier) * 60,
+          );
+        }
+      });
+
+      test('every duration on offer survives the trip', () {
+        // The old cache-secs clamp stopped at 720 s, so 30, 45, 60 and 90
+        // minutes all played with a twelve-minute window.
+        for (final minutes in kBufferDurationMinutesChoices) {
+          expect(
+            resolveReadAheadSeconds(minutes, DeviceTier.high),
+            minutes * 60,
+            reason: '$minutes min was not what mpv was told to keep',
+          );
+        }
+      });
+
+      test('a nonsense stored duration is treated as unchosen', () {
+        expect(
+          resolveReadAheadSeconds(0, DeviceTier.standard),
+          defaultBufferDurationMinutes(DeviceTier.standard) * 60,
+        );
+        expect(
+          resolveReadAheadSeconds(-15, DeviceTier.standard),
+          defaultBufferDurationMinutes(DeviceTier.standard) * 60,
+        );
+      });
+
+      test('the behind window is a capped, non-zero share of the budget', () {
+        expect(resolveCacheBehindBytes(8192), kMaxTorrentBehindMb * 1024 * 1024);
+        expect(resolveCacheBehindBytes(256), 64 * 1024 * 1024);
+        expect(
+          resolveCacheBehindBytes(64),
+          16 * 1024 * 1024,
+          reason: 'a positive window, so a back-step does not re-fetch',
+        );
+      });
+    });
   });
 }
 

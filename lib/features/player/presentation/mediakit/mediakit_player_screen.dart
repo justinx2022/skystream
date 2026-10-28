@@ -22,6 +22,7 @@ import '../../../../l10n/generated/app_localizations.dart';
 import '../../../details/presentation/details_controller.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/episode_navigator.dart';
+import '../../domain/network_buffer.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
 import '../../domain/side_car_subtitles.dart';
@@ -205,8 +206,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _player = Player(
       configuration: PlayerConfiguration(
         title: 'SkyStream',
-        bufferSize:
-            (_settings?.networkBufferMb ?? 64).clamp(16, 512) * 1024 * 1024,
+        bufferSize: _bufferPlan().megabytes * 1024 * 1024,
         logLevel: MPVLogLevel.error,
       ),
     );
@@ -256,6 +256,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     }
   }
 
+  /// The buffer the viewer asked for, resolved exactly as the settings row and
+  /// the VLC engine resolve it, so the number shown and the number used are
+  /// the same one.
+  ({int megabytes, int seconds}) _bufferPlan() {
+    final settings =
+        ref.read(playerSettingsProvider).asData?.value ?? _settings;
+    final tier = ref.read(deviceProfileProvider).asData?.value.tier ??
+        DeviceTier.standard;
+    return (
+      megabytes: resolveNetworkBufferMb(
+        settings?.networkBufferMb,
+        tier,
+        chosenDurationMinutes: settings?.bufferDurationMinutes,
+      ),
+      seconds: resolveReadAheadSeconds(settings?.bufferDurationMinutes, tier),
+    );
+  }
+
   Future<void> _applyMpvOptimizations() async {
     if (_player.platform is NativePlayer) {
       final native = _player.platform as NativePlayer;
@@ -268,10 +286,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '120');
-          await native.setProperty('demuxer-max-bytes', '268435456');  // 256 MiB
-          await native.setProperty('demuxer-max-back-bytes', '33554432'); // 32 MiB
-          await native.setProperty('demuxer-readahead-secs', '60');
           // CRITICAL: Stop libmpv from deep probing on local loopback
           await native.setProperty('demuxer-lavf-probesize', '500000');
           await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
@@ -300,10 +314,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-secs', '120');              // 120s ring buffer
-          await native.setProperty('demuxer-max-bytes', '268435456');  // 256 MiB
-          await native.setProperty('demuxer-max-back-bytes', '33554432'); // 32 MiB
-          await native.setProperty('demuxer-readahead-secs', '60');   // 60s ahead
 
           // CRITICAL: Stop libmpv from deep probing on local loopback
           await native.setProperty('demuxer-lavf-probesize', '500000');    // 500KB max probe
@@ -318,11 +328,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         if (_settings?.hardwareDecoding == false) {
           await native.setProperty('hwdec', 'no');
         }
-        // The viewer's network buffer, in the seconds of read-ahead mpv
-        // understands; two minutes is the old hardcoded value.
-        final cacheSeconds =
-            ((_settings?.bufferDurationMinutes ?? 2) * 60).clamp(30, 720);
-        await native.setProperty('cache-secs', '$cacheSeconds');
+        // The viewer's buffer, in the three units mpv splits it into. All
+        // three come from one choice: the byte budget and the read-ahead are
+        // whichever of the two runs out first, so a read-ahead shorter than
+        // the duration would quietly cap it at what used to be a hardcoded
+        // minute, and a byte budget smaller than the size would do the same.
+        final plan = _bufferPlan();
+        await native.setProperty(
+          'demuxer-max-bytes',
+          '${plan.megabytes * 1024 * 1024}',
+        );
+        await native.setProperty(
+          'demuxer-max-back-bytes',
+          '${resolveCacheBehindBytes(plan.megabytes)}',
+        );
+        await native.setProperty('demuxer-readahead-secs', '${plan.seconds}');
+        await native.setProperty('cache-secs', '${plan.seconds}');
         await _applySubtitleStyle(native);
 
         await native.setProperty('audio-pitch-correction', 'yes');

@@ -125,6 +125,32 @@ int resolveNetworkBufferMb(
   return chosenMb ?? defaultNetworkBufferMb(tier);
 }
 
+/// The read-ahead the viewer's duration choice asks for, in seconds.
+///
+/// mpv fills its cache for at most this long **and** at most the byte budget
+/// from [resolveNetworkBufferMb], whichever it reaches first, so the two are
+/// one choice read two ways. They used to disagree: the byte budget was
+/// honoured while read-ahead stayed at a hardcoded 60 s, which silently made
+/// every duration above one minute mean "one minute". When no duration was
+/// chosen, the tier default is what the settings row already shows.
+int resolveReadAheadSeconds(int? chosenDurationMinutes, DeviceTier tier) {
+  final minutes = chosenDurationMinutes != null && chosenDurationMinutes > 0
+      ? chosenDurationMinutes
+      : defaultBufferDurationMinutes(tier);
+  return (minutes * 60).clamp(30, 6 * 60 * 60);
+}
+
+/// The demuxer cache the viewer's choice asks for, in bytes.
+///
+/// A quarter of the budget, capped at 64 MB: the behind-window only serves
+/// seeks backwards, and past a minute of 1080p nobody scrubs by hand. Shares
+/// [kMaxTorrentBehindMb]'s reasoning, which is the same trade for a cache that
+/// is not a torrent's.
+int resolveCacheBehindBytes(int bufferMb) {
+  final behindMb = (bufferMb * 0.25).round().clamp(16, kMaxTorrentBehindMb);
+  return behindMb * 1024 * 1024;
+}
+
 /// The most of a torrent cache worth spending on data already played.
 ///
 /// A cap, because the behind-window is dead weight for anyone who never seeks
