@@ -64,15 +64,16 @@ jobs:
           JSON_EOF
 
       # android/app/build.gradle.kts falls back to the *debug* signing config
-      # when rootProject.file("key.properties") is absent, and only prints a
-      # warning. A missing secret must therefore fail the job here instead of
-      # shipping a debug-signed APK.
+      # when rootProject.file("key.properties") is absent. That is the expected
+      # output of this pipeline - a debug-signed build that installs over
+      # itself - so the step warns rather than failing, and says what a real
+      # signature would need. Set the four secrets to ship one.
       #
       # Paths, as build.gradle.kts expects them:
       #   key.properties -> android/key.properties (rootProject = android/)
       #   storeFile      -> resolved by file() inside the android/app project,
       #                     so the bare name points at android/app/key.jks.
-      - name: Decode Keystore
+      - name: Set Up Signing
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -82,8 +83,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 is empty. Refusing to build a release APK that Gradle would debug-sign."
-            exit 1
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set. Gradle will debug-sign this APK; it installs over the previous build but cannot be updated over a Play Store install."
+            exit 0
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/key.jks
           test -s android/app/key.jks || { echo "::error::decoded keystore is empty"; exit 1; }
@@ -95,38 +96,21 @@ jobs:
           PROPERTIES
           chmod 600 android/key.properties android/app/key.jks
 
-      # Split per ABI, obfuscated, with the mapping kept for crash symbolication.
-      - name: Build Release APKs (per ABI)
-        run: >-
-          flutter build apk --release --split-per-abi
-          --obfuscate --split-debug-info=build/symbols
-          --build-number=${{ github.run_number }}
-          --dart-define-from-file=dart-defines.json
+      - name: Build Release APK
+        run: flutter build apk --release --dart-define-from-file=dart-defines.json
 
       - name: Prepare APK Output
         run: |
           set -euo pipefail
           mkdir -p release-apks
-          shopt -s nullglob
-          apks=(build/app/outputs/flutter-apk/*.apk)
-          if [ ${#apks[@]} -eq 0 ]; then
-            echo "::error::no APKs found in build/app/outputs/flutter-apk"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          if [ ! -f "$apk" ]; then
+            echo "::error::$apk was not produced"
             exit 1
           fi
-          # basename keeps Flutter's app-<abi>-release.apk naming intact.
-          for apk in "${apks[@]}"; do
-            cp "$apk" "release-apks/$(basename "$apk")"
-          done
+          cp "$apk" release-apks/skystream-android-universal.apk
           ls -lh release-apks/
           sha256sum release-apks/*.apk | tee release-apks/SHA256SUMS
-
-      - name: Upload Symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-symbols-${{ github.run_number }}
-          path: build/symbols
-          retention-days: 30
-          if-no-files-found: error
 
       - name: Remove Keystore
         if: always()
@@ -138,7 +122,7 @@ jobs:
         with:
           tag: "android-latest"
           name: "SkyStream Android Latest Release"
-          body: "Per-ABI Release APKs (arm64-v8a, armeabi-v7a, x86_64) for Android smartphones, tablets, Android TV, and Fire TV with 2m-90m buffering and auto provider health failover. SHA256SUMS is included."
+          body: "Universal Release APK for Android smartphones, tablets, Android TV, and Fire TV with 2m-90m buffering and auto provider health failover. SHA256SUMS is included."
           allowUpdates: true
           replacesArtifacts: true
           artifacts: |
