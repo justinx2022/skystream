@@ -208,6 +208,12 @@ class AppLocalizationsHi extends AppLocalizations {
   String get viewDetails => 'विवरण देखें';
 
   @override
+  String get watchNow => 'अभी देखें';
+
+  @override
+  String get moreInfo => 'अधिक जानकारी';
+
+  @override
   String get clearAll => 'सभी साफ़ करें';
 
   @override

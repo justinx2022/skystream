@@ -208,6 +208,12 @@ class AppLocalizationsTe extends AppLocalizations {
   String get viewDetails => 'వివరాలను చూడండి';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'అన్నీ క్లియర్ చేయండి';
 
   @override

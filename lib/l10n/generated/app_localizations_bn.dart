@@ -207,6 +207,12 @@ class AppLocalizationsBn extends AppLocalizations {
   String get viewDetails => 'বিস্তারিত দেখুন';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'সব পরিষ্কার করুন';
 
   @override

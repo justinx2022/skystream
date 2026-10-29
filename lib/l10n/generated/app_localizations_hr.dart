@@ -207,6 +207,12 @@ class AppLocalizationsHr extends AppLocalizations {
   String get viewDetails => 'Vidi detalje';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Očisti sve';
 
   @override

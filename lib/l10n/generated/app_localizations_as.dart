@@ -207,6 +207,12 @@ class AppLocalizationsAs extends AppLocalizations {
   String get viewDetails => 'বিৱৰণ চাওক';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'সকলো পৰিষ্কাৰ কৰক';
 
   @override

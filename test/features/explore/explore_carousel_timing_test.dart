@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skystream/core/domain/entity/multimedia_item.dart';
 import 'package:skystream/features/explore/presentation/widgets/explore_carousel.dart';
+import 'package:skystream/l10n/generated/app_localizations.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
 MultimediaItem _movie(int i) => MultimediaItem(
@@ -50,6 +51,8 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: ExploreCarousel(
               movies: List<MultimediaItem>.generate(7, _movie),

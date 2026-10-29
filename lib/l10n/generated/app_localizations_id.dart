@@ -207,6 +207,12 @@ class AppLocalizationsId extends AppLocalizations {
   String get viewDetails => 'Lihat Detail';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Hapus Semua';
 
   @override

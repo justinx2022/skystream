@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:skystream/core/domain/entity/multimedia_item.dart';
 import 'package:skystream/core/storage/history_repository.dart';
+import 'package:skystream/core/theme/app_world.dart';
 import 'package:skystream/features/home/presentation/widgets/continue_watching_card.dart';
 import 'package:skystream/shared/widgets/cards_wrapper.dart';
 
@@ -223,8 +224,14 @@ void main() {
       expect(
         track.a,
         lessThan(1.0),
-        reason: 'the track must stay clearly darker than the white fill',
+        reason: 'the track must stay clearly darker than the accent fill',
       );
+
+      // The fill is the world accent the chrome uses everywhere else, not a
+      // bare white bar. A hand-built theme carries no AppWorldTokens, so the
+      // card falls back to the Sky Dark arm of the pack.
+      final Color fill = bar.valueColor!.value!;
+      expect(fill, kSkyDark.accent);
 
       // What is actually on the canvas: a full-width track rect first, then
       // the fill rect over the watched quarter only. 4 dp tall, flush to the
@@ -241,7 +248,7 @@ void main() {
         find.byType(LinearProgressIndicator),
         paints
           ..rect(rect: const Rect.fromLTRB(0, 0, 360, 4), color: track)
-          ..rect(rect: const Rect.fromLTRB(0, 0, 90, 4), color: Colors.white),
+          ..rect(rect: const Rect.fromLTRB(0, 0, 90, 4), color: fill),
       );
     });
 

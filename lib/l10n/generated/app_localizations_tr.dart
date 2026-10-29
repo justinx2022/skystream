@@ -207,6 +207,12 @@ class AppLocalizationsTr extends AppLocalizations {
   String get viewDetails => 'Detayları Görüntüle';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Tümünü Temizle';
 
   @override

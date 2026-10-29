@@ -207,6 +207,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get viewDetails => 'तपशील पहा';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'सर्व साफ करा';
 
   @override

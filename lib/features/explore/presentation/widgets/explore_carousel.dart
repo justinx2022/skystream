@@ -3,6 +3,7 @@ import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/router/app_router.dart';
+import '../../../../l10n/generated/app_localizations.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -704,6 +705,7 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
     required ThemeData theme,
     required BuildContext context,
   }) {
+    final l10n = AppLocalizations.of(context)!;
     final logoUrl = movie.logoUrl;
     final title = movie.title;
     final year = movie.year?.toString() ?? '';
@@ -778,14 +780,16 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
           ],
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: isDesktop
-              ? MainAxisAlignment.start
-              : MainAxisAlignment.center,
+        // A Wrap, not a Row: the two labels are localized, and on a narrow
+        // slide - or a long translation - a Row overflowed by 19 px rather
+        // than letting the second button drop to its own line.
+        Wrap(
+          alignment: isDesktop ? WrapAlignment.start : WrapAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
           children: [
             GlassActionButton(
-              label: 'Watch Now',
+              label: l10n.watchNow,
               icon: Icons.play_arrow_rounded,
               primary: true,
               onPressed: () {
@@ -796,9 +800,8 @@ class _ExploreCarouselState extends ConsumerState<ExploreCarousel>
                 }
               },
             ),
-            const SizedBox(width: 12),
             GlassActionButton(
-              label: 'More Info',
+              label: l10n.moreInfo,
               icon: Icons.info_outline_rounded,
               onPressed: () {
                 if (widget.onTap != null) {

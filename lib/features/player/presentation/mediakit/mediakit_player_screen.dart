@@ -104,6 +104,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   bool _attemptReachedPicture = false;
   String _attemptProviderId = '';
 
+  /// Whether the current source has already been reopened through the local
+  /// proxy after opening without drawing. One turn per source: a silent open
+  /// is retried once through the proxy, never in a loop.
+  bool _attemptTriedProxy = false;
+
   /// The subtitle files of what is playing - the source's and any the viewer
   /// added - which SkyStream draws over the picture rather than handing to
   /// mpv. See [SideCarSubtitles].
@@ -445,6 +450,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _attemptOpenedAt = null;
     _attemptReachedPicture = false;
     _attemptProviderId = '';
+    _attemptTriedProxy = false;
     _trackSettlingUntil = null;
     _openToken++;
     // A file the viewer added belonged to the last episode as much as the
@@ -667,22 +673,49 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   ///
   /// Nine seconds without the clock moving is well past a cold HLS start and
   /// far short of the engine's own patience; when another mirror exists,
-  /// moving to it beats leaving the viewer on a spinner. The last candidate is
-  /// left alone: a list that is slow everywhere still deserves its chance.
+  /// moving to it beats leaving the viewer on a spinner. Before the source is
+  /// given up it gets one turn through the proxy (see
+  /// [_recoverFromSilentOpen]). The last candidate is left alone after that:
+  /// a list that is slow everywhere still deserves its chance.
   void _armStartupWatchdog(int token) {
     _startupWatchdog?.cancel();
     _attemptOpenedAt = DateTime.now();
     _startupWatchdog = Timer(const Duration(seconds: 9), () {
       if (_disposed || !mounted || token != _openToken) return;
       if (_attemptReachedPicture || _isSettlingTrackChange) return;
-      final streams = _resolved?.streams ?? _candidates;
-      if (_attemptIndex + 1 >= streams.length) return;
-      _recordProviderHealth(
-        success: false,
-        reason: 'no picture within nine seconds',
-      );
-      _failoverNext();
+      unawaited(_recoverFromSilentOpen(token));
     });
+  }
+
+  /// What to do about a source that opened and never drew.
+  ///
+  /// A chunk CDN that answers with `text/html` and `nosniff` opens in mpv
+  /// without an error and then never demuxes; the local proxy is the one path
+  /// that relabels those bodies, and nothing before this point has tried it -
+  /// the native open succeeds, so the exception fallback never runs. The proxy
+  /// gets one turn per source; if the picture still does not come, the source
+  /// is abandoned like any other.
+  Future<void> _recoverFromSilentOpen(int token) async {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
+    if (!_attemptTriedProxy) {
+      final stream = streams[_attemptIndex];
+      final at = _attemptStartAt > Duration.zero ? _attemptStartAt : null;
+      final reopened = await _tryProxyFallback(
+        AppUtils.normalizeUrl(stream.url),
+        playbackHeaders(stream),
+        at,
+        token,
+      );
+      if (reopened) return;
+      if (_disposed || !mounted || token != _openToken) return;
+    }
+    if (_attemptIndex + 1 >= streams.length) return;
+    _recordProviderHealth(
+      success: false,
+      reason: 'no picture within nine seconds',
+    );
+    _failoverNext();
   }
 
   /// Feeds the source-selection ranking what actually happened. Elapsed time
@@ -871,6 +904,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _attemptOpenedAt = null;
     _attemptStartAt = at ?? Duration.zero;
     _attemptReachedPicture = false;
+    _attemptTriedProxy = false;
     _attemptProviderId = providerIdForStream(
       stream,
       fallback: _item.provider ?? '',
@@ -914,6 +948,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   ) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.scheme.startsWith('http')) return false;
+    _attemptTriedProxy = true;
     try {
       await LocalProxyService.instance.startServer();
       final proxyUrl = LocalProxyService.instance.getProxyUrl(

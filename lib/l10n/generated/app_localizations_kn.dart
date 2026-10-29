@@ -209,6 +209,12 @@ class AppLocalizationsKn extends AppLocalizations {
   String get viewDetails => 'ವಿವರಗಳನ್ನು ವೀಕ್ಷಿಸಿ';
 
   @override
+  String get watchNow => 'ಈಗ ವೀಕ್ಷಿಸಿ';
+
+  @override
+  String get moreInfo => 'ಹೆಚ್ಚಿನ ಮಾಹಿತಿ';
+
+  @override
   String get clearAll => 'ಎಲ್ಲವನ್ನೂ ತೆರವುಗೊಳಿಸಿ';
 
   @override

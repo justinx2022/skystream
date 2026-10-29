@@ -798,7 +798,6 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
             PlayerQuickPillButton(
               icon: Icons.source,
               label: l10n.sources,
-              tooltip: l10n.sources,
               onTap: () {
                 _chrome.poke();
                 _open(PlayerPanelTab.sources);
@@ -809,7 +808,6 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
             PlayerQuickPillButton(
               icon: Icons.audiotrack_rounded,
               label: l10n.audioTracks,
-              tooltip: l10n.audioTracks,
               onTap: () {
                 _chrome.poke();
                 _open(PlayerPanelTab.audio);
@@ -825,7 +823,6 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
                 return PlayerQuickPillButton(
                   icon: Icons.subtitles_rounded,
                   label: active ? 'CC' : 'CC Off',
-                  tooltip: l10n.subtitles,
                   active: active,
                   onTap: () {
                     _chrome.poke();
@@ -843,7 +840,6 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
                 return PlayerQuickPillButton(
                   icon: Icons.speed,
                   label: '${_formatSpeed(speed)}x',
-                  tooltip: l10n.playbackSpeed,
                   active: speed != 1.0,
                   onTap: _cycleSpeed,
                   isTv: isTv,

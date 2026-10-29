@@ -64,10 +64,6 @@ class MultimediaCard extends ConsumerWidget {
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.10),
-                width: 0.75,
-              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.25),
@@ -75,6 +71,16 @@ class MultimediaCard extends ConsumerWidget {
                   offset: const Offset(0, 4),
                 ),
               ],
+            ),
+            // Painted over the artwork, not around it: a border in
+            // [decoration] would inset the image by 1.5 dp and the decode
+            // width is measured from the cell.
+            foregroundDecoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.10),
+                width: 0.75,
+              ),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.md - 0.75),

@@ -395,15 +395,18 @@ class _SegmentJoin {
     final text = cue.text.trim();
     if (text.isEmpty) return;
 
-    // Deduplicate and merge overlapping or boundary-crossing cues.
-    // HLS segments frequently contain duplicate cues across segment boundaries
-    // with millisecond clock drift, causing text to be rendered 2-3 times.
+    // HLS segments overlap at their boundaries, so the same cue arrives twice
+    // with the two copies overlapping or a few milliseconds apart. The
+    // tolerance covers that drift and nothing more: the same line twice 2.5 s
+    // apart is a character saying it twice, and merging it would hold one
+    // copy on screen for both.
+    const Duration drift = Duration(milliseconds: 400);
     for (var i = cues.length - 1; i >= 0 && i >= cues.length - 40; i--) {
       final existing = cues[i];
       if (existing.placement == cue.placement && existing.text.trim() == text) {
-        final startDiff = (existing.start - cue.start).abs();
-        final isOverlapping = (cue.start <= existing.end && cue.end >= existing.start) ||
-            startDiff < const Duration(milliseconds: 2500);
+        final isOverlapping =
+            cue.start <= existing.end + drift &&
+            existing.start <= cue.end + drift;
         if (isOverlapping) {
           final mergedStart = cue.start < existing.start ? cue.start : existing.start;
           final mergedEnd = cue.end > existing.end ? cue.end : existing.end;

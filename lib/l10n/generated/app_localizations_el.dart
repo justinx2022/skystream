@@ -208,6 +208,12 @@ class AppLocalizationsEl extends AppLocalizations {
   String get viewDetails => 'Προβολή λεπτομερειών';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Εκκαθάριση όλων';
 
   @override

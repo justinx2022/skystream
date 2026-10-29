@@ -208,6 +208,12 @@ class AppLocalizationsMl extends AppLocalizations {
   String get viewDetails => 'വിശദാംശങ്ങൾ കാണുക';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'എല്ലാം മായ്ക്കുക';
 
   @override

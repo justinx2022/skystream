@@ -207,6 +207,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get viewDetails => 'Подробнее';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Очистить все';
 
   @override

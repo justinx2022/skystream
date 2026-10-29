@@ -376,15 +376,23 @@ void main() {
             .first,
       );
 
+      // The card lines up with the thing that now owns the top-right column:
+      // the quick-access pill row. The title no longer reaches the trailing
+      // line - the pills sit between them - so the card's right edge is
+      // measured against the pills, still inset by the optical inset the track
+      // and the utility row answer to.
+      final pills = tester.getRect(find.byType(PlayerQuickPillButton).last);
       expect(
         card.right,
-        lessThanOrEqualTo(titleSlot.right),
+        pills.right - HotstarPlayerStyle.trackEndInset,
         reason:
-            'the card ends at or inside the title it shares its columns with. '
-            'Not on the same number any more: the card answers to the trailing '
-            'line - the overscan inset plus the optical inset the track and '
-            'the utility row share - while the top bar\'s right edge is just '
-            'where the title ellipsises, with no glyph of its own to line up',
+            'the card ends on the trailing line the pill row above it ends on, '
+            'inset by the same optical 14 dp the track end uses',
+      );
+      expect(
+        card.overlaps(pills),
+        isFalse,
+        reason: 'and does not cover the pill row: card $card, pills $pills',
       );
       expect(
         card.overlaps(titleSlot),

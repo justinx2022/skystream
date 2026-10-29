@@ -207,6 +207,12 @@ class AppLocalizationsMk extends AppLocalizations {
   String get viewDetails => 'Види детали';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Исчисти сè';
 
   @override

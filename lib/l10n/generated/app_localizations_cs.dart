@@ -207,6 +207,12 @@ class AppLocalizationsCs extends AppLocalizations {
   String get viewDetails => 'Zobrazit podrobnosti';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Vymazat vše';
 
   @override

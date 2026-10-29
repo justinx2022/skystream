@@ -390,14 +390,21 @@ Future<ResolvedPlayback> resolvePlayback({
   }
   onCandidates?.call(streams);
 
-  final probeEnabled = handPicked
-      ? false
-      : (settings?.autoHealthScoringEnabled ?? true);
+  // A preloaded list skips the ranking above but is still a list of links
+  // nobody has opened, so it is checked like any other - and the setting still
+  // turns the check off, read without blocking when the box is already warm
+  // (the player keeps it so) because nothing else here waits on it.
+  var probeEnabled = true;
+  try {
+    probeEnabled =
+        (settings ?? read(playerSettingsProvider).asData?.value)
+            ?.autoHealthScoringEnabled ??
+        true;
+  } catch (_) {}
 
   final saved = handPicked ? 0 : _savedStreamIndex(read, item, streams);
-  // When probing/auto-health scoring is disabled, default directly to the best
-  // performing stream (saved/index 0, which is sorted top tier) without
-  // an impatient probe race that drops good high-speed links.
+  // With the check off, the leading source of the ranked list opens: no probe
+  // race, so no quick mirror can drop a slow-but-working link.
   final index = (!probeEnabled || probeCandidates <= 1)
       ? saved
       : await _firstHealthyStream(

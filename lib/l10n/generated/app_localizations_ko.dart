@@ -207,6 +207,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get viewDetails => '상세 보기';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => '모두 지우기';
 
   @override

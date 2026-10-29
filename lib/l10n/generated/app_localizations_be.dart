@@ -207,6 +207,12 @@ class AppLocalizationsBe extends AppLocalizations {
   String get viewDetails => 'Падрабязнасці';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Ачысціць усё';
 
   @override

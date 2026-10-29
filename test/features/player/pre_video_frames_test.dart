@@ -93,10 +93,17 @@ void main() {
 
   /// Three candidates the probe has to go to the network for, so the check
   /// lasts for as long as the test's HTTP client holds its answers.
+  ///
+  /// The tiers differ on purpose. Among mirrors of one tier the check picks
+  /// the quickest answer, and against a mock that answers all of them at once
+  /// "quickest" is whichever future the event loop happened to run first - a
+  /// winner that varied under a loaded `flutter test` run. With Zero in the
+  /// tier the preference asks for, tier - not timing - decides, which is the
+  /// rule the check is written to follow.
   const probed = <StreamResult>[
-    StreamResult(url: 'https://cdn.test/zero.mkv', source: 'Zero'),
-    StreamResult(url: 'https://cdn.test/one.mkv', source: 'One'),
-    StreamResult(url: 'https://cdn.test/two.mkv', source: 'Two'),
+    StreamResult(url: 'https://cdn.test/zero.mkv', source: '1080p'),
+    StreamResult(url: 'https://cdn.test/one.mkv', source: '720p'),
+    StreamResult(url: 'https://cdn.test/two.mkv', source: '720p'),
   ];
 
   String? openedUri(FakeVlcEngine engine) {

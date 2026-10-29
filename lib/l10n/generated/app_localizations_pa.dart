@@ -207,6 +207,12 @@ class AppLocalizationsPa extends AppLocalizations {
   String get viewDetails => 'ਵੇਰਵੇ ਦੇਖੋ';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'ਸਭ ਸਾਫ਼ ਕਰੋ';
 
   @override

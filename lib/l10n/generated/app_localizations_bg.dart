@@ -208,6 +208,12 @@ class AppLocalizationsBg extends AppLocalizations {
   String get viewDetails => 'Виж детайли';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Изчисти всичко';
 
   @override

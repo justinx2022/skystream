@@ -206,6 +206,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get viewDetails => '查看详情';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => '清除全部';
 
   @override

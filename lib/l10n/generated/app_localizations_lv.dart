@@ -208,6 +208,12 @@ class AppLocalizationsLv extends AppLocalizations {
   String get viewDetails => 'Skatīt informāciju';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Notīrīt visu';
 
   @override

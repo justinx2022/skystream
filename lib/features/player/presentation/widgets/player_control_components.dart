@@ -58,45 +58,65 @@ class PlayerTopBar extends StatelessWidget {
         bottom: false,
         child: Padding(
           padding: paddingOf(context, isTv: isTv),
-          child: Row(
-            children: [
-              PlayerBackButton(
-                onPressed: onBack,
-                isTv: isTv,
-                focusNode: backFocusNode,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (subtitle != null && subtitle!.isNotEmpty)
-                      Text(
-                        subtitle!,
-                        style: const TextStyle(
-                          color: HotstarPlayerStyle.secondaryText,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // The back button's declared box and the gap after it; both are
+              // fixed, so the only width in question is what the title and the
+              // trailing run share.
+              final double leading = (isTv ? 54 : 48) + 12;
+              // The title keeps a floor rather than collapsing to nothing, and
+              // the trailing run - a scrolling strip of pills - gives instead.
+              // Without a bound the strip asked for its full intrinsic width
+              // (about 540 dp at television type) and the Row overflowed by
+              // 171-247 px on a handset or a 400 dp desktop window.
+              final double minTitle = isTv ? 200 : 96;
+              final double share = constraints.maxWidth - leading - minTitle;
+              final double trailingMax = share < 0 ? 0 : share;
+              return Row(
+                children: [
+                  PlayerBackButton(
+                    onPressed: onBack,
+                    isTv: isTv,
+                    focusNode: backFocusNode,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (subtitle != null && subtitle!.isNotEmpty)
+                          Text(
+                            subtitle!,
+                            style: const TextStyle(
+                              color: HotstarPlayerStyle.secondaryText,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            color: HotstarPlayerStyle.primaryText,
+                            fontSize: isTv ? 22 : 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: HotstarPlayerStyle.primaryText,
-                        fontSize: isTv ? 22 : 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              ?trailing,
-            ],
+                  ),
+                  if (trailing != null)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: trailingMax),
+                      child: trailing!,
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -933,12 +953,17 @@ class _PlayerActionButtonState extends State<PlayerActionButton> {
 
 /// An ergonomic frosted glass quick-access pill for high-priority controls
 /// (CC, Audio, Speed, Sources) that sits directly on the player surface.
+///
+/// No [Tooltip]: the pill prints its own label beside the glyph, so a tooltip
+/// repeating that label is a second, identical announcement of the same action
+/// - and the action already has one home in the bottom bar, whose icon-only
+/// button is the one that needs the tooltip. Two tooltips carrying one message
+/// also made every `find.byTooltip` in the screen tests ambiguous.
 class PlayerQuickPillButton extends StatefulWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool active;
-  final String? tooltip;
   final bool isTv;
 
   const PlayerQuickPillButton({
@@ -947,7 +972,6 @@ class PlayerQuickPillButton extends StatefulWidget {
     required this.label,
     required this.onTap,
     this.active = false,
-    this.tooltip,
     this.isTv = false,
   });
 
@@ -977,48 +1001,45 @@ class _PlayerQuickPillButtonState extends State<PlayerQuickPillButton> {
             width: 0.75,
           );
 
-    return Tooltip(
-      message: widget.tooltip ?? widget.label,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: HotstarPlayerStyle.fastMotionDuration,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(999),
-              border: border,
-              boxShadow: active
-                  ? const [
-                      BoxShadow(
-                        color: Color(0x330A84FF),
-                        blurRadius: 14,
-                        spreadRadius: -2,
-                      ),
-                    ]
-                  : HotstarPlayerStyle.glassPillShadow,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(widget.icon, size: 15, color: color),
-                const SizedBox(width: 5),
-                Text(
-                  widget.label,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: HotstarPlayerStyle.fastMotionDuration,
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+            border: border,
+            boxShadow: active
+                ? const [
+                    BoxShadow(
+                      color: Color(0x330A84FF),
+                      blurRadius: 14,
+                      spreadRadius: -2,
+                    ),
+                  ]
+                : HotstarPlayerStyle.glassPillShadow,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.icon, size: 15, color: color),
+              const SizedBox(width: 5),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

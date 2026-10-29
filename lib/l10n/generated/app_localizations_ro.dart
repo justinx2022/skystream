@@ -207,6 +207,12 @@ class AppLocalizationsRo extends AppLocalizations {
   String get viewDetails => 'Vezi detalii';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Șterge tot';
 
   @override

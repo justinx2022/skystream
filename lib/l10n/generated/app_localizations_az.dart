@@ -208,6 +208,12 @@ class AppLocalizationsAz extends AppLocalizations {
   String get viewDetails => 'Ətraflı bax';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Hamısını təmizlə';
 
   @override

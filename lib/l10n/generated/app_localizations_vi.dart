@@ -207,6 +207,12 @@ class AppLocalizationsVi extends AppLocalizations {
   String get viewDetails => 'Xem chi tiết';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Xóa tất cả';
 
   @override

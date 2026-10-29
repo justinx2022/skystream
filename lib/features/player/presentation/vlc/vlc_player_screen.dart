@@ -1939,18 +1939,16 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   void _armFirstFrameDeadline(int generation, {required bool torrent}) {
     _firstFrameDeadline?.cancel();
     _firstFrameDeadline = Timer(
-      torrent ? kTorrentStallRecoverAfter : const Duration(seconds: 40),
+      torrent ? kTorrentStallRecoverAfter : kFirstFrameDeadline,
       () {
         if (_disposed || generation != _generation || _sawFrames) return;
         if (!_foreground || _inPip) {
           _armFirstFrameDeadline(generation, torrent: torrent);
           return;
         }
-        final probeEnabled = _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ?? true;
-        if (!probeEnabled) {
-          _armFirstFrameDeadline(generation, torrent: torrent);
-          return;
-        }
+        // Not gated on auto health scoring: that setting decides whether
+        // candidates are speed-checked and scored, not whether a source that
+        // never produced a picture is ever left.
         _recover(
           _l10n?.playerReasonSourceNeverStarted ?? 'the source never started',
         );
@@ -2086,11 +2084,8 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         _setStatus(_l10n?.playerReconnecting ?? '');
         unawaited(_nudge(value));
       case StallAction.recover:
-        final probeEnabled = _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ?? true;
-        if (!probeEnabled) {
-          unawaited(_nudge(value));
-          return;
-        }
+        // Failover stays on even with auto health scoring off: that setting
+        // scores candidates, it does not make a frozen source playable.
         final l10n = _l10n;
         _recover(
           _sawFrames

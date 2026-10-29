@@ -421,6 +421,31 @@ seg2.vtt
       expect(cues.first.start, _ms(5000));
     });
 
+    test('keeps a line said twice two seconds apart', () {
+      // "Again" twice with a second of silence between them is dialogue, not
+      // a segment straddle: merging the two held one copy on screen for 3 s.
+      const map = 'X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000';
+      final cues = joinSubtitleSegments([
+        'WEBVTT\n$map\n\n00:00:05.000 --> 00:00:06.000\nAgain\n\n'
+            '00:00:07.000 --> 00:00:08.000\nAgain\n',
+      ]);
+
+      expect(cues, hasLength(2));
+      expect(cues.first.end, _ms(6000));
+      expect(cues.last.start, _ms(7000));
+    });
+
+    test('merges a straddle whose two copies drift apart', () {
+      const map = 'X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000';
+      final cues = joinSubtitleSegments([
+        'WEBVTT\n$map\n\n00:00:05.000 --> 00:00:06.000\nEdge\n',
+        'WEBVTT\n$map\n\n00:00:06.200 --> 00:00:07.000\nEdge\n',
+      ]);
+
+      expect(cues, hasLength(1));
+      expect(cues.single.end, _ms(7000));
+    });
+
     test('handles the MPEG-2 timestamp wrapping between segments', () {
       final cues = joinSubtitleSegments([
         'WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:8589844592,LOCAL:00:00:00.000\n\n'

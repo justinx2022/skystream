@@ -315,6 +315,80 @@ void main() {
       );
     });
   });
+
+  group('disguised segment types', () {
+    // Some CDNs serve .ts chunks from .html paths as text/html with
+    // X-Content-Type-Options: nosniff, and mpv then refuses to demux them.
+    // The relabel has to hold for a successful body and only for that.
+    test('relabels a 200 text/html chunk served from an .html path', () async {
+      final cdn = await origin((request) {
+        final body = utf8.encode('TS-PAYLOAD');
+        request.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType('text', 'html')
+          ..headers.set('x-content-type-options', 'nosniff')
+          ..headers.contentLength = body.length
+          ..add(body);
+        request.response.close();
+      });
+
+      proxy = LocalProxyService();
+      await proxy.startServer();
+
+      final meta = await _fetchMeta(
+        proxy.getProxyUrl('http://127.0.0.1:${cdn.port}/chunk/page-1.html'),
+      );
+
+      expect(meta.status, 200);
+      expect(meta.contentType, 'video/mp2t');
+    });
+
+    test('leaves an error page its real type', () async {
+      // A block or error page is not video: calling it video/mp2t hides the
+      // failure from the engine, which then stalls on HTML instead of
+      // failing over.
+      final cdn = await origin((request) {
+        final body = utf8.encode('<html>forbidden</html>');
+        request.response
+          ..statusCode = 403
+          ..headers.contentType = ContentType('text', 'html')
+          ..headers.set('x-content-type-options', 'nosniff')
+          ..headers.contentLength = body.length
+          ..add(body);
+        request.response.close();
+      });
+
+      proxy = LocalProxyService();
+      await proxy.startServer();
+
+      final meta = await _fetchMeta(
+        proxy.getProxyUrl('http://127.0.0.1:${cdn.port}/chunk/page-1.html'),
+      );
+
+      expect(meta.status, 403);
+      expect(meta.contentType, 'text/html');
+    });
+  });
+}
+
+/// Status and declared type of [url], as the player would see them.
+///
+/// Only the type is asserted: this host answers every loopback HTTP response
+/// with security headers of its own, so their presence says nothing about what
+/// the proxy forwarded.
+Future<({int status, String? contentType})> _fetchMeta(String url) async {
+  final client = HttpClient();
+  try {
+    final response = await (await client.getUrl(Uri.parse(url))).close();
+    final meta = (
+      status: response.statusCode,
+      contentType: response.headers.contentType?.mimeType,
+    );
+    await response.drain<void>();
+    return meta;
+  } finally {
+    client.close(force: true);
+  }
 }
 
 // A throwaway self-signed certificate for 127.0.0.1, valid until 2126. It is

@@ -602,14 +602,18 @@ class LocalProxyService {
       if (cached != null) {
         prefetcher.onSegmentRequested(targetUrl, _clientFor);
         request.response.statusCode = cached.statusCode;
+        final relabelDisguised =
+            _isDisguisedSegment(targetUrl, cached.statusCode);
         cached.headers.forEach((k, v) {
           final lk = k.toLowerCase();
-          if (lk == 'x-content-type-options') return;
-          if (lk == 'content-type' && (v.contains('text/html') || v.contains('text/plain'))) {
-            request.response.headers.set('content-type', 'video/mp2t');
-          } else {
-            request.response.headers.set(k, v);
+          if (relabelDisguised) {
+            if (lk == 'x-content-type-options') return;
+            if (lk == 'content-type' && _isTextualType(v)) {
+              request.response.headers.set('content-type', 'video/mp2t');
+              return;
+            }
           }
+          request.response.headers.set(k, v);
         });
         request.response.headers.add(
           "Access-Control-Allow-Origin",
@@ -792,6 +796,14 @@ class LocalProxyService {
               ?.toLowerCase()
               .contains('gzip') ==
           true;
+      // A CDN that serves .ts chunks from .html paths as text/html with
+      // nosniff leaves mpv unable to demux them. Only a successful body may
+      // be relabelled: an error or block page keeps its real type so the
+      // engine fails fast instead of stalling on HTML.
+      final relabelDisguised =
+          !isResponseM3u8 &&
+          _isDisguisedSegment(targetUrl, response.statusCode);
+
       response.headers.forEach((name, values) {
         final lowerName = name.toLowerCase();
         if (lowerName == 'access-control-allow-origin') return;
@@ -808,18 +820,10 @@ class LocalProxyService {
         // Drop the lying content-range from CDN edge-decompression mismatch.
         if (lowerName == 'content-range' && misleadingContentRange) return;
 
-        // Disguised video segments (e.g. CDNs that disguise .ts chunks as .html with text/html and nosniff)
-        // If it's a segment request and the upstream returns text/html, rewrite to video/mp2t and strip nosniff
-        final isSegmentReq = !isResponseM3u8 &&
-            (request.uri.queryParameters['_ext'] == '.ts' ||
-                targetUrl.contains('.ts') ||
-                targetUrl.contains('page-') ||
-                targetUrl.contains('/segment') ||
-                targetUrl.contains('.html'));
-        if (isSegmentReq) {
+        if (relabelDisguised) {
           if (lowerName == 'x-content-type-options') return;
           if (lowerName == 'content-type' &&
-              values.any((v) => v.contains('text/html') || v.contains('text/plain'))) {
+              values.any(_isTextualType)) {
             request.response.headers.set('content-type', 'video/mp2t');
             return;
           }
@@ -985,6 +989,30 @@ class LocalProxyService {
     }
 
     throw Exception("Too many redirects");
+  }
+
+  /// Whether a 2xx body at [targetUrl] is a media segment a CDN has dressed
+  /// up as text, and so the one case where the declared type may be rewritten.
+  ///
+  /// Non-2xx is never relabelled: a 403, a 404 or a Cloudflare challenge has a
+  /// body that is not video, and calling it video/mp2t only hides that from
+  /// the engine. Playlist paths are excluded for the same reason - their body
+  /// is text on purpose.
+  bool _isDisguisedSegment(String targetUrl, int statusCode) {
+    if (statusCode != 200 && statusCode != 206) return false;
+    final lower = targetUrl.toLowerCase();
+    if (lower.contains('.m3u8') || lower.contains('.m3u')) return false;
+    return lower.contains('.ts') ||
+        lower.contains('.m4s') ||
+        lower.contains('.aac') ||
+        lower.contains('/segment') ||
+        lower.contains('page-') ||
+        lower.contains('.html');
+  }
+
+  bool _isTextualType(String value) {
+    final lower = value.toLowerCase();
+    return lower.contains('text/html') || lower.contains('text/plain');
   }
 
   bool _isM3u8(String? mimeType, String url) {

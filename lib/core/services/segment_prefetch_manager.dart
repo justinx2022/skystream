@@ -226,12 +226,38 @@ class SegmentPrefetchManager {
         });
         headers[HttpHeaders.contentLengthHeader] = bytes.length.toString();
 
-        // Disguised video segments (e.g. CDNs that disguise .ts chunks as .html with text/html and nosniff)
-        final isDisguisedHtml = headers['content-type']?.contains('text/html') == true ||
-            headers['content-type']?.contains('text/plain') == true;
-        if (isDisguisedHtml) {
-          headers['content-type'] = 'video/mp2t';
-          headers.remove('x-content-type-options');
+        // A CDN that serves a .ts chunk from an .html path as text/html with
+        // nosniff leaves mpv unable to demux it. Only a 2xx body is cached
+        // here, so a block page that arrives as a 200 is the one case this
+        // cannot tell apart. Header names keep the casing they arrive in, so
+        // both the lookup and the removal ignore case.
+        String? contentTypeKey;
+        for (final String key in headers.keys) {
+          if (key.toLowerCase() == 'content-type') {
+            contentTypeKey = key;
+            break;
+          }
+        }
+        final lowerUrl = url.toLowerCase();
+        final segmentLike = !lowerUrl.contains('.m3u8') &&
+            !lowerUrl.contains('.m3u') &&
+            (lowerUrl.contains('.ts') ||
+                lowerUrl.contains('.m4s') ||
+                lowerUrl.contains('.aac') ||
+                lowerUrl.contains('/segment') ||
+                lowerUrl.contains('page-') ||
+                lowerUrl.contains('.html'));
+        final contentType = contentTypeKey == null
+            ? ''
+            : headers[contentTypeKey]!.toLowerCase();
+        if (segmentLike &&
+            contentTypeKey != null &&
+            (contentType.contains('text/html') ||
+                contentType.contains('text/plain'))) {
+          headers[contentTypeKey] = 'video/mp2t';
+          headers.removeWhere(
+            (String key, _) => key.toLowerCase() == 'x-content-type-options',
+          );
         }
 
         final cached = CachedSegment(

@@ -78,7 +78,7 @@ class DirectHlsService {
 
           final data = res.data;
           if (data is Map &&
-              data['status_code'] == '200' &&
+              data['status_code']?.toString() == '200' &&
               data['data'] is Map) {
             final streamUrls = (data['data'] as Map)['stream_urls'];
             if (streamUrls is List) {
@@ -149,11 +149,20 @@ class DirectHlsService {
             final playlistMatch = RegExp(r'''url\s*:\s*["']([^"']+)''').firstMatch(embedHtml);
 
             if (tokenMatch != null && expiresMatch != null && playlistMatch != null) {
-              final playlistUrl = playlistMatch.group(1)!;
-              final token = tokenMatch.group(1)!;
-              final expires = expiresMatch.group(1)!;
-              final sep = playlistUrl.contains('?') ? '&' : '?';
-              final masterUrl = '$playlistUrl${sep}token=$token&expires=$expires&h=1';
+              // The embed writes the playlist as a path as often as a whole
+              // URL, and a token with "+" or "=" appended raw is read as a
+              // space or a second separator - both arrive as a 403 that looks
+              // like a dead link.
+              final playlistUri = Uri.parse('https://vixsrc.to')
+                  .resolve(playlistMatch.group(1)!);
+              final masterUrl = playlistUri
+                  .replace(queryParameters: <String, String>{
+                    ...playlistUri.queryParameters,
+                    'token': tokenMatch.group(1)!,
+                    'expires': expiresMatch.group(1)!,
+                    'h': '1',
+                  })
+                  .toString();
 
               if (seen.add(masterUrl)) {
                 streams.add(AddonStreamSource(

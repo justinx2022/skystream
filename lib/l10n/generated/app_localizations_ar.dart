@@ -208,6 +208,12 @@ class AppLocalizationsAr extends AppLocalizations {
   String get viewDetails => 'عرض التفاصيل';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'مسح الكل';
 
   @override

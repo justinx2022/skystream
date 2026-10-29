@@ -207,6 +207,12 @@ class AppLocalizationsGu extends AppLocalizations {
   String get viewDetails => 'વિગતો જુઓ';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'બધું સાફ કરો';
 
   @override

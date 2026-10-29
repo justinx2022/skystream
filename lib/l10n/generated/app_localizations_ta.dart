@@ -207,6 +207,12 @@ class AppLocalizationsTa extends AppLocalizations {
   String get viewDetails => 'விவரங்களைக் காண்க';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'அனைத்தையும் அழி';
 
   @override

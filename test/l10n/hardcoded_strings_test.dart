@@ -166,7 +166,6 @@ const Map<String, int> _budget = <String, int>{
   'lib/features/explore/presentation/widgets/explore_mode_selector_dialog.dart': 2,
   'lib/features/extensions/screens/extensions_screen.dart': 1,
   'lib/features/extensions/screens/plugin_settings_dialog.dart': 3,
-  'lib/features/home/presentation/home_screen.dart': 1,
   'lib/features/library/presentation/widgets/downloads_tab.dart': 7,
   'lib/features/nuvio/presentation/nuvio_plugins_screen.dart': 1,
   'lib/features/nuvio/presentation/nuvio_plugins_view.dart': 13,

@@ -208,6 +208,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String get viewDetails => 'Voir les détails';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Tout effacer';
 
   @override

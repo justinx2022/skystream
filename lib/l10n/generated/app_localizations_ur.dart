@@ -207,6 +207,12 @@ class AppLocalizationsUr extends AppLocalizations {
   String get viewDetails => 'تفصیلات دیکھیں';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'سب صاف کریں';
 
   @override

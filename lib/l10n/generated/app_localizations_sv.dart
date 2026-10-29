@@ -207,6 +207,12 @@ class AppLocalizationsSv extends AppLocalizations {
   String get viewDetails => 'Visa detaljer';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Rensa allt';
 
   @override

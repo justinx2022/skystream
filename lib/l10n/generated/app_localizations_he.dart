@@ -207,6 +207,12 @@ class AppLocalizationsHe extends AppLocalizations {
   String get viewDetails => 'צפה בפרטים';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'נקה הכל';
 
   @override

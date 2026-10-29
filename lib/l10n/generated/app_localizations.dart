@@ -561,6 +561,18 @@ abstract class AppLocalizations {
   /// **'View Details'**
   String get viewDetails;
 
+  /// No description provided for @watchNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Watch Now'**
+  String get watchNow;
+
+  /// No description provided for @moreInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'More Info'**
+  String get moreInfo;
+
   /// No description provided for @clearAll.
   ///
   /// In en, this message translates to:

@@ -99,7 +99,20 @@ void main() {
           const MethodChannel('plugins.flutter.io/path_provider'),
           null,
         );
-    if (support.existsSync()) support.deleteSync(recursive: true);
+    // A refresh the test started can still be finishing its last write when
+    // the test ends, and Windows refuses to unlink a file another handle is
+    // holding (errno 32). Retry rather than fail the suite on a teardown: the
+    // directory is per-test scratch in the system temp, so a file that stays
+    // locked is left for the OS, not for a red assertion.
+    for (var attempt = 0; attempt < 20; attempt++) {
+      try {
+        if (!support.existsSync()) return;
+        support.deleteSync(recursive: true);
+        return;
+      } on FileSystemException {
+        sleep(const Duration(milliseconds: 50));
+      }
+    }
   });
 
   ProviderContainer boot(_FakeNuvio nuvio, {bool autoUpdate = true}) {

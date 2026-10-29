@@ -616,7 +616,7 @@ void main() {
       await tester.pump();
     });
 
-    testWidgets('does not run on past a second without a report', (
+    testWidgets('runs on through a gap in the reports, but stops at its cap', (
       tester,
     ) async {
       final start = tester.binding.clock.now();
@@ -641,12 +641,22 @@ void main() {
         ),
       );
 
-      // Stalled without saying so: the line at five seconds waits for the
-      // engine rather than running over a frozen picture.
+      // A gap of a few seconds is treated as a late report, not a stall, so a
+      // line due inside the run-on still arrives: the engine last said 3.5 s
+      // and the line is due at five.
       await tester.pump(const Duration(seconds: 3));
-      expect(find.text('First'), findsNothing);
+      expect(find.text('First'), findsWidgets);
 
-      await engine.emit(<String, Object?>{'state': 'paused', 'position': 3500});
+      // The run-on is capped, though. Half a minute with no report must not
+      // walk the clock to the ten-second line: a picture frozen at 3.5 s would
+      // otherwise print a line for a moment it never reached.
+      await tester.pump(const Duration(seconds: 30));
+      expect(find.text('Up top'), findsNothing);
+
+      await engine.emit(<String, Object?>{
+        'state': 'paused',
+        'position': 3500,
+      });
       await tester.pump();
     });
 

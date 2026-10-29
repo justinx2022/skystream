@@ -3809,8 +3809,8 @@ void main() {
         expect(chip, findsOneWidget);
 
         // The container, read off the render tree rather than assumed: the
-        // nearest DecoratedBox above the chip has to be the opaque pill, not
-        // the chrome's own translucent scrim.
+        // nearest DecoratedBox above the chip has to be the pill, not the
+        // chrome's own translucent scrim.
         final Iterable<DecoratedBox> shells = tester.widgetList<DecoratedBox>(
           find.ancestor(of: chip, matching: find.byType(DecoratedBox)),
         );
@@ -3825,8 +3825,10 @@ void main() {
         final BoxDecoration pill = shells.first.decoration as BoxDecoration;
         expect(
           pill.color,
-          const Color(0xB3000000),
-          reason: 'the same fill the unlock chip has always had',
+          HotstarPlayerStyle.glassPillBackground,
+          reason:
+              'the chip wears the same glass fill as the utility pills, so it '
+              'reads as part of the chrome rather than a black slab on it',
         );
         expect(
           pill.border,

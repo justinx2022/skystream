@@ -207,6 +207,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get viewDetails => '詳細を表示';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'すべてクリア';
 
   @override

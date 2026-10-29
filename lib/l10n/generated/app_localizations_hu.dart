@@ -208,6 +208,12 @@ class AppLocalizationsHu extends AppLocalizations {
   String get viewDetails => 'Részletek megtekintése';
 
   @override
+  String get watchNow => 'Watch Now';
+
+  @override
+  String get moreInfo => 'More Info';
+
+  @override
   String get clearAll => 'Összes törlése';
 
   @override
