@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../logger/app_logger.dart';
+import '../../logger/playback_trace.dart';
 import '../models/addon_manifest.dart';
 import '../models/addon_stream_source.dart';
 import 'addon_client.dart';
@@ -470,8 +472,14 @@ class AddonStreamService {
       );
       completed++;
       if (!updates.isClosed) updates.add(snapshot());
+      talker.info(
+        '[perf] addon-list · ${addon.displayName} '
+        '${stopwatch.elapsedMilliseconds}ms links=$added'
+        '${lastError == null ? '' : ' error=$lastError'}',
+      );
     }
 
+    final listTrace = PlaybackTrace('addon-list');
     unawaited(() async {
       final hlsTask = () async {
         if (_ref != null) {
@@ -492,8 +500,10 @@ class AddonStreamService {
               }
               if (!updates.isClosed) updates.add(snapshot());
             }
+            listTrace.lap('hls', 'links=${hlsSources.length}');
           } catch (e) {
             if (kDebugMode) debugPrint('[AddonStreamService] direct HLS error: $e');
+            listTrace.warn('hls', 'failed ${e.runtimeType}');
           }
         }
       }();
@@ -515,6 +525,7 @@ class AddonStreamService {
         }),
       );
       await Future.wait([...workers, hlsTask]);
+      listTrace.lap('done', 'links=${streams.length} addons=${providers.length}');
       if (!updates.isClosed) await updates.close();
     }());
 

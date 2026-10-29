@@ -12,6 +12,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../../../core/domain/entity/multimedia_item.dart';
+import '../../../../core/logger/playback_trace.dart';
 import '../../../../core/network/http_defaults.dart';
 import '../../../../core/providers/device_info_provider.dart';
 import '../../../../core/services/local_proxy_service.dart';
@@ -22,6 +23,7 @@ import '../../../../l10n/generated/app_localizations.dart';
 import '../../../details/presentation/details_controller.dart';
 import '../../../settings/presentation/player_settings_provider.dart';
 import '../../domain/episode_navigator.dart';
+import '../../domain/hls_video_length.dart';
 import '../../domain/network_buffer.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/playback_tracker.dart';
@@ -108,6 +110,31 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// proxy after opening without drawing. One turn per source: a silent open
   /// is retried once through the proxy, never in a loop.
   bool _attemptTriedProxy = false;
+
+  /// The leash the current attempt was given, kept so the record made when it
+  /// runs out can say how long the wait was.
+  Duration _attemptWatchdogWait = _kSilentOpenWatchdog;
+
+  /// How long a progressive source may open without drawing before the proxy
+  /// gets its turn.
+  ///
+  /// Nine seconds without the clock moving is well past a cold start and far
+  /// short of the engine's own patience; when another mirror exists, moving
+  /// to it beats leaving the viewer on a spinner.
+  static const Duration _kSilentOpenWatchdog = Duration(seconds: 9);
+
+  /// The same leash for an HLS source, and less than half as long.
+  ///
+  /// A playlist that opens but never demuxes is what a dead "direct" HLS link
+  /// looks like - the master answers in milliseconds, the segments are what
+  /// is not there - and those come in rows. Four seconds still covers a cold
+  /// playlist fetch; the extra five bought nothing but spinner, because the
+  /// proxy's turn and the failover that follows both end in the same 403.
+  static const Duration _kSilentOpenWatchdogHls = Duration(seconds: 4);
+
+  /// Stage timings for the current start, so `/logs` can say where the time
+  /// went without a debugger attached.
+  PlaybackTrace? _trace;
 
   /// The subtitle files of what is playing - the source's and any the viewer
   /// added - which SkyStream draws over the picture rather than handing to
@@ -503,6 +530,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           _attemptReachedPicture = true;
           _startupWatchdog?.cancel();
           _startupWatchdog = null;
+          _trace?.lap(
+            'first-picture',
+            'attempt=$_attemptIndex '
+                'since-open=${DateTime.now().difference(openedAt).inMilliseconds}ms',
+          );
           _recordProviderHealth(
             success: true,
             responseTime: DateTime.now().difference(openedAt),
@@ -671,20 +703,42 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   /// Arms the backstop for a source that opens but never draws.
   ///
-  /// Nine seconds without the clock moving is well past a cold HLS start and
-  /// far short of the engine's own patience; when another mirror exists,
-  /// moving to it beats leaving the viewer on a spinner. Before the source is
-  /// given up it gets one turn through the proxy (see
-  /// [_recoverFromSilentOpen]). The last candidate is left alone after that:
-  /// a list that is slow everywhere still deserves its chance.
+  /// The wait depends on what was opened - a progressive file gets the longer
+  /// leash, a playlist the shorter one - because the two fail in different
+  /// shapes (see [_kSilentOpenWatchdogHls]). Either way the source gets one
+  /// turn through the proxy first (see [_recoverFromSilentOpen]), and the
+  /// last candidate is left alone after that: a list that is slow everywhere
+  /// still deserves its chance.
   void _armStartupWatchdog(int token) {
     _startupWatchdog?.cancel();
     _attemptOpenedAt = DateTime.now();
-    _startupWatchdog = Timer(const Duration(seconds: 9), () {
+    final wait = _attemptWatchdogWait = _watchdogWait;
+    _startupWatchdog = Timer(wait, () {
       if (_disposed || !mounted || token != _openToken) return;
       if (_attemptReachedPicture || _isSettlingTrackChange) return;
+      _trace?.warn(
+        'no-picture',
+        'watchdog-${wait.inSeconds}s attempt=$_attemptIndex '
+            'proxy-tried=$_attemptTriedProxy',
+      );
       unawaited(_recoverFromSilentOpen(token));
     });
+  }
+
+  /// Which leash the source on screen has earned.
+  ///
+  /// Read off the URL rather than the engine: a source that redirects to a
+  /// playlist is opened by its original address, and a `.m3u8` there is still
+  /// a playlist on the other side.
+  Duration get _watchdogWait {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) {
+      return _kSilentOpenWatchdog;
+    }
+    final uri = Uri.tryParse(AppUtils.normalizeUrl(streams[_attemptIndex].url));
+    return uri != null && looksLikeHls(uri)
+        ? _kSilentOpenWatchdogHls
+        : _kSilentOpenWatchdog;
   }
 
   /// What to do about a source that opened and never drew.
@@ -713,7 +767,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (_attemptIndex + 1 >= streams.length) return;
     _recordProviderHealth(
       success: false,
-      reason: 'no picture within nine seconds',
+      reason: 'no picture within ${_attemptWatchdogWait.inSeconds} seconds',
     );
     _failoverNext();
   }
@@ -756,6 +810,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   }
 
   Future<void> _startPlayback() async {
+    _trace = PlaybackTrace('mediakit');
     setState(() {
       _isLoading = true;
       _error = '';
@@ -786,6 +841,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       } catch (_) {
         resumePoint = localResume;
       }
+      _trace?.lap('resume');
 
       final resolved = await resolvePlayback(
         read: ref.read,
@@ -811,6 +867,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _resolved = resolved;
       _candidates = resolved.streams;
       _attemptIndex = resolved.index;
+      _trace?.lap(
+        'resolved',
+        'streams=${resolved.streams.length} index=${resolved.index}',
+      );
 
       _token++;
       _recorder = PlaybackProgressRecorder(
@@ -909,6 +969,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       stream,
       fallback: _item.provider ?? '',
     );
+    _trace?.lap(
+      'open',
+      'attempt=$index source=${stream.providerName} quality=${stream.source}',
+    );
     _loadSourceSubtitles(stream, headers, at ?? Duration.zero);
 
     try {
@@ -930,6 +994,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       });
     } catch (e) {
       if (kDebugMode) debugPrint('[MediaKit] Failed to open stream $index: $e');
+      _trace?.warn('open-failed', 'attempt=$index error=${e.runtimeType}');
       if (_disposed || !mounted || token != _openToken) return;
       if (await _tryProxyFallback(url, headers, at, token)) return;
       _recordProviderHealth(success: false, reason: 'could not open: $e');
@@ -960,6 +1025,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         play: true,
       );
       if (_disposed || !mounted || token != _openToken) return true;
+      _trace?.lap('proxy-retry', 'reopened attempt=$_attemptIndex');
       _armStartupWatchdog(token);
       setState(() {
         if (_player.state.playing) {
@@ -971,6 +1037,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       return true;
     } catch (e) {
       if (kDebugMode) debugPrint('[MediaKit] Proxy fallback failed: $e');
+      _trace?.warn('proxy-retry', 'failed ${e.runtimeType}');
       return false;
     }
   }
@@ -978,8 +1045,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   void _failoverNext() {
     final streams = _resolved?.streams ?? _candidates;
     if (_attemptIndex + 1 < streams.length) {
+      _trace?.warn(
+        'failover',
+        'attempt=$_attemptIndex -> ${_attemptIndex + 1}/${streams.length}',
+      );
       _openCandidate(_attemptIndex + 1, startAt: _position);
     } else {
+      _trace?.warn('gave-up', 'no source left');
       if (mounted) {
         setState(() {
           _isLoading = false;

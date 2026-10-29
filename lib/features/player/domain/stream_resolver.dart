@@ -21,6 +21,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/domain/entity/multimedia_item.dart';
 import '../../../core/extensions/base_provider.dart';
 import '../../../core/extensions/extension_manager.dart';
+import '../../../core/logger/playback_trace.dart';
 import '../../../core/storage/history_repository.dart';
 import '../../../core/network/http_defaults.dart';
 import '../../../core/network/probe_answer.dart';
@@ -294,8 +295,10 @@ Future<ResolvedPlayback> resolvePlayback({
   Future<int>? pick,
   Future<void>? abandon,
 }) async {
+  final trace = PlaybackTrace('resolve');
   final direct = _directStream(item, videoUrl);
   if (direct != null) {
+    trace.lap('direct');
     final streams = [direct];
     onCandidates?.call(streams);
     return ResolvedPlayback(streams: streams, index: 0);
@@ -360,6 +363,10 @@ Future<ResolvedPlayback> resolvePlayback({
   if (raw.isEmpty) {
     throw const StreamResolutionException(StreamResolutionFailure.noStreams);
   }
+  trace.lap(
+    'links',
+    'count=${raw.length} source=${handPicked ? 'hand-picked' : provider?.packageName}',
+  );
 
   // Ranking that list again opens a source nobody picked, and a filter can
   // drop the picked one out of it altogether - so a hand-picked list does not
@@ -389,6 +396,10 @@ Future<ResolvedPlayback> resolvePlayback({
     throw const StreamResolutionException(StreamResolutionFailure.noStreams);
   }
   onCandidates?.call(streams);
+  trace.lap(
+    'ranked',
+    'count=${streams.length}${didFallback ? ' quality-fallback' : ''}',
+  );
 
   // A preloaded list skips the ranking above but is still a list of links
   // nobody has opened, so it is checked like any other - and the setting still
@@ -418,6 +429,11 @@ Future<ResolvedPlayback> resolvePlayback({
           abandon: abandon,
         );
 
+  trace.lap(
+    'probe',
+    'enabled=$probeEnabled candidates=$probeCandidates '
+        'budget=${probeBudget.inMilliseconds}ms index=$index',
+  );
   return ResolvedPlayback(
     streams: streams,
     index: index,

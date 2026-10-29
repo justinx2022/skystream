@@ -35,6 +35,7 @@ import '../../domain/hls_video_length.dart';
 import '../../domain/playback_progress.dart';
 import '../../domain/buffered_ahead.dart';
 import '../../../../core/logger/app_logger.dart';
+import '../../../../core/logger/playback_trace.dart';
 import '../../domain/network_buffer.dart';
 import '../../domain/smoothness.dart';
 import '../../domain/track_memory.dart';
@@ -375,6 +376,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   int _generation = 0;
   int _attemptIndex = 0;
   int _attemptRetries = 0;
+
+  /// Stage timings for the current start, so `/logs` can say where the time
+  /// went without a debugger attached.
+  PlaybackTrace? _trace;
 
   /// Whether [SubtitleDefault.off] still applies to the media this attempt
   /// opened. Read the whole rule on [_applySubtitleDefault]; false for the
@@ -906,6 +911,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     // stragglers - a probe still in flight when the viewer advanced - can be
     // told apart from this one's answers and dropped.
     final generation = ++_resolveGeneration;
+    _trace = PlaybackTrace('vlc');
     // Whatever the last run learned describes the last run. A retry re-probes
     // and an episode advance resolves different media, and either one showing
     // the previous attempt list is worse than showing nothing.
@@ -971,6 +977,10 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
       );
       if (_disposed) return;
       _resolved = resolved;
+      _trace?.lap(
+        'resolved',
+        'streams=${resolved.streams.length} index=${resolved.index}',
+      );
       _publishPanelData();
       // The race is over. A pick from here on is held for the first open -
       // see [_pickSource].
@@ -3293,6 +3303,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
     if (firstFrame || recovering) _setStatus('');
     if (firstFrame) {
       _firstFrameDeadline?.cancel();
+      _trace?.lap('first-frame', 'attempt=$_attemptIndex');
       // Recorded for the source lists: this row has proved it can be reached.
       _playedRows.add(_attemptIndex);
       _publishPanelData();
