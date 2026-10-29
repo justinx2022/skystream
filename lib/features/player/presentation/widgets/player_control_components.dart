@@ -616,9 +616,23 @@ class PlayerCenterPlayButton extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                // A paint, not a layer: no opacity or filter here, so nothing
-                // new is composited over the platform view.
-                color: Colors.black.withValues(alpha: 0.34),
+                color: const Color(0x520C1424),
+                border: Border.all(
+                  color: const Color(0x38FFFFFF),
+                  width: 1.0,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x40000000),
+                    blurRadius: 20,
+                    offset: Offset(0, 4),
+                  ),
+                  BoxShadow(
+                    color: Color(0x1F0A84FF),
+                    blurRadius: 28,
+                    spreadRadius: -4,
+                  ),
+                ],
               ),
               // 0.52 keeps the glyph inside the disc; filling it reads as a
               // bare icon with a smudge behind it.
@@ -676,7 +690,17 @@ class PlayerCenterSeekButton extends StatelessWidget {
           // and these two are reached with the same thumb.
           child: SizedBox.square(
             dimension: 48,
-            child: Icon(icon, color: Colors.white, size: 30),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0x380C1424),
+                border: Border.all(
+                  color: const Color(0x24FFFFFF),
+                  width: 0.75,
+                ),
+              ),
+              child: Icon(icon, color: Colors.white, size: 28),
+            ),
           ),
         ),
       ),
@@ -899,6 +923,101 @@ class _PlayerActionButtonState extends State<PlayerActionButton> {
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// An ergonomic frosted glass quick-access pill for high-priority controls
+/// (CC, Audio, Speed, Sources) that sits directly on the player surface.
+class PlayerQuickPillButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool active;
+  final String? tooltip;
+  final bool isTv;
+
+  const PlayerQuickPillButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+    this.tooltip,
+    this.isTv = false,
+  });
+
+  @override
+  State<PlayerQuickPillButton> createState() => _PlayerQuickPillButtonState();
+}
+
+class _PlayerQuickPillButtonState extends State<PlayerQuickPillButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.active;
+    final color = active ? HotstarPlayerStyle.accent : Colors.white;
+    final bg = active
+        ? HotstarPlayerStyle.accent.withValues(alpha: 0.22)
+        : HotstarPlayerStyle.glassPillBackground;
+    final border = active
+        ? Border.all(
+            color: HotstarPlayerStyle.accent.withValues(alpha: 0.65),
+            width: 0.85,
+          )
+        : Border.all(
+            color: _hovered
+                ? HotstarPlayerStyle.glassPillBorderHover
+                : HotstarPlayerStyle.glassPillBorder,
+            width: 0.75,
+          );
+
+    return Tooltip(
+      message: widget.tooltip ?? widget.label,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: HotstarPlayerStyle.fastMotionDuration,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(999),
+              border: border,
+              boxShadow: active
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x330A84FF),
+                        blurRadius: 14,
+                        spreadRadius: -2,
+                      ),
+                    ]
+                  : HotstarPlayerStyle.glassPillShadow,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(widget.icon, size: 15, color: color),
+                const SizedBox(width: 5),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

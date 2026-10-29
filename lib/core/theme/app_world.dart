@@ -71,16 +71,45 @@ class AppWorldColors {
 
   bool get isDark => brightness == Brightness.dark;
 
-  /// The fill behind a glass panel: the raised colour, translucent enough that
-  /// the page's own gradient and artwork show through, opaque enough that text
-  /// on it stays readable.
-  Color get glassFill => elevated.withValues(alpha: isDark ? 0.62 : 0.74);
+  /// The fill behind a glass panel: ultra-transparent Apple-grade glassmorphism,
+  /// letting the page's gradient and backdrop show through cleanly with depth.
+  Color get glassFill => elevated.withValues(alpha: isDark ? 0.45 : 0.55);
 
-  /// The hairline that gives glass its edge. One bright side, no full outline:
-  /// an even ring reads as a border, a top edge reads as a lit pane.
+  /// The luminous edge that gives glass its characteristic shimmer.
+  /// Brighter on the top edge for a lit-from-above physical glass effect.
   Color get glassEdge => (isDark ? Colors.white : Colors.black).withValues(
-    alpha: isDark ? 0.14 : 0.08,
+    alpha: isDark ? 0.18 : 0.12,
   );
+
+  /// A secondary, softer edge for layered translucent elements.
+  Color get glassEdgeSoft => (isDark ? Colors.white : Colors.black).withValues(
+    alpha: isDark ? 0.08 : 0.05,
+  );
+
+  /// Inner highlight for depth - simulates light catching the top rim.
+  LinearGradient get glassHighlight => LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      (isDark ? Colors.white : Colors.black).withValues(alpha: 0.10),
+      (isDark ? Colors.white : Colors.black).withValues(alpha: 0.0),
+    ],
+    stops: const [0.0, 0.45],
+  );
+
+  /// A subtle luminous ambient glow behind elevated glass panels.
+  List<BoxShadow> get glassGlow => [
+    BoxShadow(
+      color: (isDark ? accent : background).withValues(alpha: 0.15),
+      blurRadius: 24,
+      spreadRadius: -8,
+    ),
+    BoxShadow(
+      color: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.04),
+      blurRadius: 40,
+      spreadRadius: -12,
+    ),
+  ];
 
   /// A scrim for text laid over artwork. Opaque at the bottom so the last line
   /// of a title always sits on the page colour rather than on a poster.
@@ -89,11 +118,25 @@ class AppWorldColors {
     end: Alignment.bottomCenter,
     colors: [
       background.withValues(alpha: 0.0),
-      background.withValues(alpha: 0.35),
-      background.withValues(alpha: 0.82),
+      background.withValues(alpha: 0.28),
+      background.withValues(alpha: 0.72),
       background,
     ],
-    stops: const [0.0, 0.55, 0.86, 1.0],
+    stops: const [0.0, 0.45, 0.78, 1.0],
+  );
+
+  /// An extended scrim for immersive full-screen artwork viewing.
+  LinearGradient get artworkScrimExtended => LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      background.withValues(alpha: 0.0),
+      background.withValues(alpha: 0.12),
+      background.withValues(alpha: 0.55),
+      background.withValues(alpha: 0.88),
+      background,
+    ],
+    stops: const [0.0, 0.25, 0.55, 0.82, 1.0],
   );
 
   /// The page behind everything: a shallow vertical wash built from the world's
@@ -211,4 +254,141 @@ class AppWorldTokens extends ThemeExtension<AppWorldTokens> {
     if (other is! AppWorldTokens) return this;
     return t < 0.5 ? this : other;
   }
+}
+
+/// Blur intensity tokens for consistent Apple-grade glass effects across the app.
+enum GlassBlurIntensity {
+  /// Subtle blur for cards and small surfaces - preserves detail.
+  subtle(8.0),
+
+  /// Medium blur for panels and sheets - creates clear depth.
+  medium(16.0),
+
+  /// Strong blur for overlays and modals - maximum depth separation.
+  strong(28.0),
+
+  /// Ultra blur for immersive surfaces like full-screen player backdrop.
+  ultra(40.0);
+
+  const GlassBlurIntensity(this.sigma);
+  final double sigma;
+
+  double scaled(double factor) => sigma * factor;
+}
+
+/// Tokens for glass panel styling.
+@immutable
+class GlassTokens {
+  const GlassTokens({
+    required this.blurIntensity,
+    required this.borderRadius,
+    required this.borderWidth,
+    required this.padding,
+  });
+
+  final GlassBlurIntensity blurIntensity;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+  final EdgeInsets padding;
+
+  /// Standard glass panel tokens.
+  static const GlassTokens panel = GlassTokens(
+    blurIntensity: GlassBlurIntensity.medium,
+    borderRadius: BorderRadius.all(Radius.circular(16)),
+    borderWidth: 0.75,
+    padding: EdgeInsets.all(16),
+  );
+
+  /// Compact glass for chips, pills, and small elements.
+  static const GlassTokens compact = GlassTokens(
+    blurIntensity: GlassBlurIntensity.subtle,
+    borderRadius: BorderRadius.all(Radius.circular(999)),
+    borderWidth: 0.5,
+    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  );
+
+  /// Large glass for sheets and modals.
+  static const GlassTokens sheet = GlassTokens(
+    blurIntensity: GlassBlurIntensity.strong,
+    borderRadius: BorderRadius.all(Radius.circular(24)),
+    borderWidth: 0.75,
+    padding: EdgeInsets.all(24),
+  );
+
+  /// Immersive glass for full-screen surfaces.
+  static const GlassTokens immersive = GlassTokens(
+    blurIntensity: GlassBlurIntensity.ultra,
+    borderRadius: BorderRadius.all(Radius.circular(0)),
+    borderWidth: 0.0,
+    padding: EdgeInsets.zero,
+  );
+}
+
+/// Animation tokens for ultra-smooth, spring-based motion.
+@immutable
+class AnimationTokens {
+  const AnimationTokens({
+    required this.duration,
+    required this.spring,
+    required this.staggerDelay,
+  });
+
+  final Duration duration;
+  final SpringDescription spring;
+  final Duration staggerDelay;
+
+  static const Duration instant = Duration(milliseconds: 80);
+  static const Duration quick = Duration(milliseconds: 150);
+  static const Duration standard = Duration(milliseconds: 280);
+  static const Duration smooth = Duration(milliseconds: 400);
+  static const Duration dramatic = Duration(milliseconds: 550);
+
+  static const SpringDescription snappy = SpringDescription(
+    mass: 1.0,
+    stiffness: 500.0,
+    damping: 28.0,
+  );
+
+  static const SpringDescription standardSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 350.0,
+    damping: 26.0,
+  );
+
+  static const SpringDescription smoothSpring = SpringDescription(
+    mass: 1.0,
+    stiffness: 250.0,
+    damping: 24.0,
+  );
+
+  static const SpringDescription bouncy = SpringDescription(
+    mass: 1.0,
+    stiffness: 400.0,
+    damping: 18.0,
+  );
+}
+
+/// Player-specific tokens for the ergonomic modern player redesign.
+@immutable
+class PlayerTokens {
+  const PlayerTokens();
+
+  // Player chrome dimensions
+  static const double miniHeight = 64.0;
+  static const double progressHeight = 4.0;
+  static const double progressHeightExpanded = 6.0;
+  static const double progressThumbSize = 12.0;
+  static const double progressThumbGlowRadius = 14.0;
+
+  // Ergonomic control surface sizes
+  static const double controlSizeSmall = 34.0;
+  static const double controlSizeMedium = 46.0;
+  static const double controlSizeLarge = 60.0;
+
+  // Floating glass pill tokens
+  static const BorderRadius pillRadius = BorderRadius.all(Radius.circular(999));
+  static const BorderSide glassPillBorder = BorderSide(
+    color: Color(0x28FFFFFF),
+    width: 0.75,
+  );
 }

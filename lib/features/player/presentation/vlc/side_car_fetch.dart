@@ -39,25 +39,38 @@ Future<List<int>?> fetchSideCar(
     }
   }
   if (!url.scheme.startsWith('http')) return null;
-  final cancel = CancelToken();
-  try {
-    final response = await dio.getUri<List<int>>(
-      url,
-      cancelToken: cancel,
-      options: Options(
-        headers: headers,
-        responseType: ResponseType.bytes,
-        receiveTimeout: _kTimeout,
-        sendTimeout: _kTimeout,
-      ),
-      // An address that turns out to be a video is abandoned rather than read
-      // into memory whole.
-      onReceiveProgress: (received, _) {
-        if (received > _kMaxBytes) cancel.cancel();
-      },
-    );
-    return response.data;
-  } catch (_) {
-    return null;
+
+  final effectiveHeaders = <String, String>{
+    'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    ...?headers,
+  };
+
+  // Up to 2 attempts for resilience against temporary network blips
+  for (var attempt = 0; attempt < 2; attempt++) {
+    final cancel = CancelToken();
+    try {
+      final response = await dio.getUri<List<int>>(
+        url,
+        cancelToken: cancel,
+        options: Options(
+          headers: effectiveHeaders,
+          responseType: ResponseType.bytes,
+          receiveTimeout: _kTimeout,
+          sendTimeout: _kTimeout,
+        ),
+        onReceiveProgress: (received, _) {
+          if (received > _kMaxBytes) cancel.cancel();
+        },
+      );
+      if (response.data != null && response.data!.isNotEmpty) {
+        return response.data;
+      }
+    } catch (_) {
+      if (attempt == 1) return null;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
   }
+  return null;
 }

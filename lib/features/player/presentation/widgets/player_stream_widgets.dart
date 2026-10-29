@@ -942,6 +942,13 @@ class _PlayerSeekBarState extends State<PlayerSeekBar> {
                                     borderRadius: BorderRadius.circular(
                                       thumbRadius,
                                     ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x660A84FF),
+                                        blurRadius: 10,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),

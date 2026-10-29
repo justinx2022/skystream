@@ -32,11 +32,9 @@ import '../../domain/subtitle_cues.dart';
 import '../../domain/subtitle_playback.dart';
 import '../../domain/subtitle_style.dart';
 
-/// How far the clock is run on past the engine's last report. Past this the
-/// engine is late rather than between reports - a stall it has not announced
-/// yet - and subtitles running on over a frozen picture are worse than ones
-/// that wait.
-const Duration _kMaxRunOn = Duration(seconds: 1);
+/// How far the clock is run on past the engine's last report. Increased to 4 seconds
+/// to ensure jitter or engine thread lags do not intermittently drop subtitle lines.
+const Duration _kMaxRunOn = Duration(seconds: 4);
 
 /// Space between the lines and the edge of the player area, as a share of the
 /// frame height.
@@ -84,6 +82,10 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
   /// Wakes the view when the lines on screen next change.
   Timer? _wake;
 
+  /// Periodic heartbeat to ensure subtitles remain stout and responsive even if
+  /// player position callbacks lag or throttle.
+  Timer? _heartbeat;
+
   /// The engine's last reported position, and when on [_now] it came.
   Duration _reported = Duration.zero;
   Duration _reportedAt = Duration.zero;
@@ -95,7 +97,18 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
     super.initState();
     widget.playback.addListener(_onEngine);
     widget.subtitles.addListener(_refresh);
+    _heartbeat = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) => _onHeartbeat(),
+    );
     _onEngine();
+  }
+
+  void _onHeartbeat() {
+    if (!mounted) return;
+    if (widget.playback.isPlaying) {
+      _refresh();
+    }
   }
 
   @override
@@ -117,6 +130,7 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
     widget.playback.removeListener(_onEngine);
     widget.subtitles.removeListener(_refresh);
     _wake?.cancel();
+    _heartbeat?.cancel();
     super.dispose();
   }
 
@@ -174,14 +188,62 @@ class _SideCarSubtitleViewState extends State<SideCarSubtitleView> {
     );
   }
 
+  /// Deduplicates shown cues and handles roll-up / overlapping cues so that identical
+  /// lines are never rendered 2-3 times on screen simultaneously.
+  List<SubtitleCue> _deduplicateCues(List<SubtitleCue> rawCues) {
+    if (rawCues.length <= 1) return rawCues;
+
+    final result = <SubtitleCue>[];
+    final seenTexts = <String>{};
+
+    for (final cue in rawCues) {
+      final text = cue.text.trim();
+      if (text.isEmpty) continue;
+
+      final normalized = text.replaceAll(RegExp(r'\s+'), ' ');
+
+      if (seenTexts.contains(normalized)) {
+        continue;
+      }
+
+      // Handle roll-up captions or sub-lines
+      var isDuplicate = false;
+      for (var i = 0; i < result.length; i++) {
+        final existing = result[i];
+        final existingNorm = existing.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+
+        if (existingNorm.contains(normalized) && normalized.length > 2) {
+          isDuplicate = true;
+          break;
+        }
+        if (normalized.contains(existingNorm) && existingNorm.length > 2) {
+          result[i] = cue;
+          seenTexts.remove(existingNorm);
+          seenTexts.add(normalized);
+          isDuplicate = true;
+          break;
+        }
+      }
+
+      if (!isDuplicate) {
+        seenTexts.add(normalized);
+        result.add(cue);
+      }
+    }
+
+    return result;
+  }
+
   Widget _lines(Size area) {
     final style = subtitleStyleFrom(widget.settings);
     final fontSize = subtitleFontSize(style, area);
     final margin = subtitleFrameHeight(area) * _kEdgeMargin;
     final side = area.width * _kSideMargin;
 
+    final activeCues = _deduplicateCues(_shown);
+
     List<Widget> band(SubtitlePlacement placement) => [
-      for (final cue in _shown)
+      for (final cue in activeCues)
         if (cue.placement == placement) _cue(cue, style, fontSize),
     ];
 

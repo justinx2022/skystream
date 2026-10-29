@@ -155,30 +155,27 @@ class _PanelSurface extends StatelessWidget {
 
   final Widget child;
 
-  /// Gloss down the face of the glass: a cool highlight at the top-left corner
-  /// falling away to nothing by the middle. The old panel spent a full-size
-  /// gradient layer and a radial one on this; as a gradient on the fill it is
-  /// free.
+  /// Luminous gloss down the face of the glass: cool translucent highlight at top-left
   static const LinearGradient _gloss = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: <Color>[Color(0x0AFFFFFF), Color(0x03FFFFFF), Color(0x00FFFFFF)],
-    stops: <double>[0.0, 0.4, 1.0],
+    colors: <Color>[
+      Color(0x18FFFFFF),
+      Color(0x06FFFFFF),
+      Color(0x00FFFFFF),
+    ],
+    stops: <double>[0.0, 0.35, 1.0],
   );
 
-  /// The drawer's left edge is the one that faces the video, so the rim
-  /// highlight goes there. The old panel put it on the right, against the
-  /// screen edge, where nothing could see it.
+  /// The drawer's left edge faces the video, with a luminous razor edge
   static const Border _rim = Border(
-    left: BorderSide(color: Color(0x1FFFFFFF), width: 0.5),
+    left: BorderSide(color: Color(0x30FFFFFF), width: 0.75),
   );
 
-  /// Only the leading corners round. The other side is flush against the
-  /// screen, and a rounded corner there would be a sliver of video in the
-  /// corner of a surface that is meant to be attached to the edge.
+  /// Only the leading corners round with Apple-grade smooth curvature
   static const BorderRadius _radius = BorderRadius.only(
-    topLeft: Radius.circular(14),
-    bottomLeft: Radius.circular(14),
+    topLeft: Radius.circular(18),
+    bottomLeft: Radius.circular(18),
   );
 
   @override
@@ -189,9 +186,14 @@ class _PanelSurface extends StatelessWidget {
         borderRadius: _radius,
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Color(0x80000000),
-            blurRadius: 32,
-            offset: Offset(-6, 0),
+            color: Color(0x66000000),
+            blurRadius: 36,
+            offset: Offset(-8, 0),
+          ),
+          BoxShadow(
+            color: Color(0x140A84FF),
+            blurRadius: 40,
+            spreadRadius: -10,
           ),
         ],
       ),

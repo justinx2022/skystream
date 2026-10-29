@@ -6,13 +6,55 @@ import 'package:flutter/material.dart';
 class HotstarPlayerStyle {
   // --- Colors ---
   static const Color background = Color(0xFF000000);
-  static const Color panel = Color(0xFF05070B);
-  static const Color panelElevated = Color(0xFF090D14);
+  static const Color panel = Color(0x8C060A12);
+  static const Color panelElevated = Color(0xA60E1524);
   static const Color accent = Color(0xFF0A84FF);
+  static const Color accentGlow = Color(0x4D0A84FF);
   static const Color hotstar = Color(0xFF1F80E0);
   static const Color accentAlt = Color(0xFFDD3EFF);
   static const Color primaryText = Color(0xF2FFFFFF);
   static const Color secondaryText = Color(0xA6FFFFFF);
+
+  // --- Apple-Grade Glassmorphism Tokens ---
+  static const Color glassPanel = Color(0x80080D18);
+  static const Color glassPanelBorder = Color(0x26FFFFFF);
+  static const Color glassPanelBorderSoft = Color(0x12FFFFFF);
+  static const Color glassPillBackground = Color(0x480C1424);
+  static const Color glassPillBorder = Color(0x2EFFFFFF);
+  static const Color glassPillBorderHover = Color(0x59FFFFFF);
+
+  static const List<BoxShadow> glassPanelShadow = [
+    BoxShadow(
+      color: Color(0x66000000),
+      blurRadius: 28,
+      offset: Offset(-4, 0),
+    ),
+    BoxShadow(
+      color: Color(0x1A0A84FF),
+      blurRadius: 36,
+      spreadRadius: -10,
+    ),
+  ];
+
+  static const List<BoxShadow> glassPillShadow = [
+    BoxShadow(
+      color: Color(0x40000000),
+      blurRadius: 16,
+      offset: Offset(0, 4),
+    ),
+  ];
+
+  /// Luminous sheen for glass panels and pill buttons
+  static const LinearGradient glassSheen = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color(0x14FFFFFF),
+      Color(0x05FFFFFF),
+      Color(0x00FFFFFF),
+    ],
+    stops: [0.0, 0.45, 1.0],
+  );
 
   /// The smallest type in the chrome: panel secondary lines, torrent stats,
   /// the countdown's caption. Alpha 0x75 is the first step that clears WCAG AA

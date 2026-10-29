@@ -392,6 +392,32 @@ class _SegmentJoin {
   }
 
   void _keep(SubtitleCue cue) {
+    final text = cue.text.trim();
+    if (text.isEmpty) return;
+
+    // Deduplicate and merge overlapping or boundary-crossing cues.
+    // HLS segments frequently contain duplicate cues across segment boundaries
+    // with millisecond clock drift, causing text to be rendered 2-3 times.
+    for (var i = cues.length - 1; i >= 0 && i >= cues.length - 40; i--) {
+      final existing = cues[i];
+      if (existing.placement == cue.placement && existing.text.trim() == text) {
+        final startDiff = (existing.start - cue.start).abs();
+        final isOverlapping = (cue.start <= existing.end && cue.end >= existing.start) ||
+            startDiff < const Duration(milliseconds: 2500);
+        if (isOverlapping) {
+          final mergedStart = cue.start < existing.start ? cue.start : existing.start;
+          final mergedEnd = cue.end > existing.end ? cue.end : existing.end;
+          cues[i] = SubtitleCue(
+            start: mergedStart,
+            end: mergedEnd,
+            spans: existing.spans.isNotEmpty ? existing.spans : cue.spans,
+            placement: existing.placement,
+          );
+          return;
+        }
+      }
+    }
+
     if (_seen.add(cue)) cues.add(cue);
   }
 }

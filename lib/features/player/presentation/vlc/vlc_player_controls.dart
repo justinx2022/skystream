@@ -770,6 +770,91 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
     );
   }
 
+  /// Cycles playback speed directly between common presets without opening a dialog.
+  void _cycleSpeed() {
+    _chrome.poke();
+    const speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+    final current = widget.controller.value.playbackSpeed;
+    var nextIndex = 0;
+    for (var i = 0; i < speeds.length; i++) {
+      if ((speeds[i] - current).abs() < 0.1) {
+        nextIndex = (i + 1) % speeds.length;
+        break;
+      }
+    }
+    final nextSpeed = speeds[nextIndex];
+    widget.controller.setPlaybackSpeed(nextSpeed);
+    _showToast('${_formatSpeed(nextSpeed)}x');
+  }
+
+  /// Quick-access ergonomic frosted glass pills for essential controls (CC, Audio, Speed, Sources).
+  Widget _quickPills(AppLocalizations l10n, {required bool isTv}) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_hasPanelTab(PlayerPanelTab.sources))
+            PlayerQuickPillButton(
+              icon: Icons.source,
+              label: l10n.sources,
+              tooltip: l10n.sources,
+              onTap: () {
+                _chrome.poke();
+                _open(PlayerPanelTab.sources);
+              },
+              isTv: isTv,
+            ),
+          if (_hasPanelTab(PlayerPanelTab.audio))
+            PlayerQuickPillButton(
+              icon: Icons.audiotrack_rounded,
+              label: l10n.audioTracks,
+              tooltip: l10n.audioTracks,
+              onTap: () {
+                _chrome.poke();
+                _open(PlayerPanelTab.audio);
+              },
+              isTv: isTv,
+            ),
+          if (_hasPanelTab(PlayerPanelTab.subtitles))
+            PlayerValueSelector<int?>(
+              controller: widget.controller,
+              selector: (v) => v.activeSubtitleTrackId,
+              builder: (context, activeSub) {
+                final active = activeSub != null;
+                return PlayerQuickPillButton(
+                  icon: Icons.subtitles_rounded,
+                  label: active ? 'CC' : 'CC Off',
+                  tooltip: l10n.subtitles,
+                  active: active,
+                  onTap: () {
+                    _chrome.poke();
+                    _open(PlayerPanelTab.subtitles);
+                  },
+                  isTv: isTv,
+                );
+              },
+            ),
+          if (!widget.isLive)
+            PlayerValueSelector<double>(
+              controller: widget.controller,
+              selector: (v) => v.playbackSpeed,
+              builder: (context, speed) {
+                return PlayerQuickPillButton(
+                  icon: Icons.speed,
+                  label: '${_formatSpeed(speed)}x',
+                  tooltip: l10n.playbackSpeed,
+                  active: speed != 1.0,
+                  onTap: _cycleSpeed,
+                  isTv: isTv,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
   /// Volume to restore when unmuting: the last non-zero level actually
   /// applied, by whichever route applied it. Written in [_setVolume] rather
   /// than in the M branch, because a level set by the rail drag or by a
@@ -2062,6 +2147,7 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
                       subtitle: widget.subtitle,
                       onBack: widget.onBack,
                       isTv: isTv,
+                      trailing: _quickPills(l10n, isTv: isTv),
                     ),
                   ),
                 ),
@@ -2190,9 +2276,13 @@ class _VlcPlayerControlsState extends ConsumerState<VlcPlayerControls> {
   /// in, unlike the backdrop filters this file's header forbids.
   static Widget _chipPill(Widget child) => DecoratedBox(
     decoration: BoxDecoration(
-      color: const Color(0xB3000000),
+      color: HotstarPlayerStyle.glassPillBackground,
       borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: HotstarPlayerStyle.divider),
+      border: Border.all(
+        color: HotstarPlayerStyle.glassPillBorder,
+        width: 0.75,
+      ),
+      boxShadow: HotstarPlayerStyle.glassPillShadow,
     ),
     child: child,
   );

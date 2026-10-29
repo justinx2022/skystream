@@ -37,15 +37,11 @@ import '../../../../../shared/focus/app_focus.dart';
 /// still hold its text. The worst case is a white frame, where a row's label
 /// still measures 13:1 and its detail line 3.4:1 — and it is the detail line,
 /// not the label, that sets the floor.
-const Color kPanelSurface = Color(0xBF060608);
+const Color kPanelSurface = Color(0x8C080E18);
 
 /// [kPanelSurface] with no glass in it, for the one place a colour has to be
 /// blended down onto the surface rather than drawn over it.
-///
-/// A badge tint alpha-blended against a translucent base comes out translucent
-/// too, and a chip that lets the picture through is a chip with no edge. This
-/// is the same obsidian at full strength.
-const Color _kPanelSurfaceOpaque = Color(0xFF060608);
+const Color _kPanelSurfaceOpaque = Color(0xFF080E18);
 
 /// Row background when focused. Solid rather than a scrim so it reads at a
 /// distance on a television.
