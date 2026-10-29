@@ -814,7 +814,8 @@ class LocalProxyService {
             (request.uri.queryParameters['_ext'] == '.ts' ||
                 targetUrl.contains('.ts') ||
                 targetUrl.contains('page-') ||
-                targetUrl.contains('/segment'));
+                targetUrl.contains('/segment') ||
+                targetUrl.contains('.html'));
         if (isSegmentReq) {
           if (lowerName == 'x-content-type-options') return;
           if (lowerName == 'content-type' &&
