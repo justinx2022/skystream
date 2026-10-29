@@ -226,6 +226,14 @@ class SegmentPrefetchManager {
         });
         headers[HttpHeaders.contentLengthHeader] = bytes.length.toString();
 
+        // Disguised video segments (e.g. CDNs that disguise .ts chunks as .html with text/html and nosniff)
+        final isDisguisedHtml = headers['content-type']?.contains('text/html') == true ||
+            headers['content-type']?.contains('text/plain') == true;
+        if (isDisguisedHtml) {
+          headers['content-type'] = 'video/mp2t';
+          headers.remove('x-content-type-options');
+        }
+
         final cached = CachedSegment(
           bytes: bytes,
           headers: headers,

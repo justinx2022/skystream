@@ -602,7 +602,15 @@ class LocalProxyService {
       if (cached != null) {
         prefetcher.onSegmentRequested(targetUrl, _clientFor);
         request.response.statusCode = cached.statusCode;
-        cached.headers.forEach((k, v) => request.response.headers.set(k, v));
+        cached.headers.forEach((k, v) {
+          final lk = k.toLowerCase();
+          if (lk == 'x-content-type-options') return;
+          if (lk == 'content-type' && (v.contains('text/html') || v.contains('text/plain'))) {
+            request.response.headers.set('content-type', 'video/mp2t');
+          } else {
+            request.response.headers.set(k, v);
+          }
+        });
         request.response.headers.add(
           "Access-Control-Allow-Origin",
           "http://127.0.0.1:$_serverPort",
@@ -799,6 +807,23 @@ class LocalProxyService {
         if (lowerName == 'content-encoding' && wasGzip) return;
         // Drop the lying content-range from CDN edge-decompression mismatch.
         if (lowerName == 'content-range' && misleadingContentRange) return;
+
+        // Disguised video segments (e.g. CDNs that disguise .ts chunks as .html with text/html and nosniff)
+        // If it's a segment request and the upstream returns text/html, rewrite to video/mp2t and strip nosniff
+        final isSegmentReq = !isResponseM3u8 &&
+            (request.uri.queryParameters['_ext'] == '.ts' ||
+                targetUrl.contains('.ts') ||
+                targetUrl.contains('page-') ||
+                targetUrl.contains('/segment'));
+        if (isSegmentReq) {
+          if (lowerName == 'x-content-type-options') return;
+          if (lowerName == 'content-type' &&
+              values.any((v) => v.contains('text/html') || v.contains('text/plain'))) {
+            request.response.headers.set('content-type', 'video/mp2t');
+            return;
+          }
+        }
+
         for (final value in values) {
           request.response.headers.add(name, value);
         }
