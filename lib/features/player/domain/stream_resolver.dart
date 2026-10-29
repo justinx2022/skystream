@@ -390,11 +390,15 @@ Future<ResolvedPlayback> resolvePlayback({
   }
   onCandidates?.call(streams);
 
+  final probeEnabled = handPicked
+      ? false
+      : (settings?.autoHealthScoringEnabled ?? true);
+
   final saved = handPicked ? 0 : _savedStreamIndex(read, item, streams);
-  // A tapped source leads the race, so it opens unless it is slow: the check
-  // finishes on it the moment it answers, and only a source that makes the
-  // viewer wait hands over to a quicker mirror of the same tier.
-  final index = probeCandidates <= 1
+  // When probing/auto-health scoring is disabled, default directly to the best
+  // performing stream (saved/index 0, which is sorted top tier) without
+  // an impatient probe race that drops good high-speed links.
+  final index = (!probeEnabled || probeCandidates <= 1)
       ? saved
       : await _firstHealthyStream(
           streams,

@@ -282,10 +282,10 @@ class PlayerSettingsScreen extends ConsumerWidget {
                   ),
                   SettingsTile(
                     icon: Icons.health_and_safety_rounded,
-                    title: 'Auto Health Scoring & Failover',
+                    title: 'Stream Probing & Auto-Failover',
                     subtitle: playerSettings.autoHealthScoringEnabled
-                        ? 'Prioritizing fast, healthy links & auto-switching'
-                        : 'Standard provider order without auto-switching',
+                        ? 'Probing link health & auto-switching if slow'
+                        : 'Default to best performing stream; no auto-switching',
                     trailing: Switch(
                       value: playerSettings.autoHealthScoringEnabled,
                       onChanged: (val) => ref

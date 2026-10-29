@@ -962,7 +962,7 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         preloadedStreams: _preloaded,
         probeCandidates: probeCandidates,
         probeBudget:
-            seamless ? const Duration(milliseconds: 1200) : kProbeBudget,
+            seamless ? const Duration(milliseconds: 3500) : kProbeBudget,
         isCancelled: () => _disposed,
         onCandidates: (streams) => _onCandidates(generation, streams),
         onProbe: (index, outcome) => _onProbe(generation, index, outcome),
@@ -1939,10 +1939,15 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
   void _armFirstFrameDeadline(int generation, {required bool torrent}) {
     _firstFrameDeadline?.cancel();
     _firstFrameDeadline = Timer(
-      torrent ? kTorrentStallRecoverAfter : kFirstFrameDeadline,
+      torrent ? kTorrentStallRecoverAfter : const Duration(seconds: 40),
       () {
         if (_disposed || generation != _generation || _sawFrames) return;
         if (!_foreground || _inPip) {
+          _armFirstFrameDeadline(generation, torrent: torrent);
+          return;
+        }
+        final probeEnabled = _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ?? true;
+        if (!probeEnabled) {
           _armFirstFrameDeadline(generation, torrent: torrent);
           return;
         }
@@ -2081,6 +2086,11 @@ class _VlcPlayerScreenState extends ConsumerState<VlcPlayerScreen>
         _setStatus(_l10n?.playerReconnecting ?? '');
         unawaited(_nudge(value));
       case StallAction.recover:
+        final probeEnabled = _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ?? true;
+        if (!probeEnabled) {
+          unawaited(_nudge(value));
+          return;
+        }
         final l10n = _l10n;
         _recover(
           _sawFrames
