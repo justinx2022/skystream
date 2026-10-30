@@ -29,6 +29,8 @@ import '../../../core/utils/app_utils.dart';
 import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../core/services/provider_health_service.dart';
+import '../../../core/services/dahl_service.dart';
+import '../../settings/presentation/ai_settings_provider.dart';
 import '../../library/presentation/history_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
@@ -345,16 +347,32 @@ Future<ResolvedPlayback> resolvePlayback({
         );
       } catch (_) {}
     } catch (e) {
+      // Dahl Self-Healing Scraper Hook
+      var healed = false;
       try {
-        read(providerHealthServiceProvider).recordFailure(
-          provider?.packageName ?? '',
-          reason: '$e',
+        final dahl = read(dahlServiceProvider);
+        final healedLink = await dahl.repairBrokenScraper(
+          rawSnippet: '$e',
+          streamHint: '${item.title} $videoUrl',
         );
+        if (healedLink != null) {
+          raw = [StreamResult(url: healedLink, source: 'Dahl Healed Stream', providerName: 'Dahl AI')];
+          healed = true;
+        }
       } catch (_) {}
-      throw StreamResolutionException(
-        StreamResolutionFailure.loadFailed,
-        detail: '$e',
-      );
+
+      if (!healed) {
+        try {
+          read(providerHealthServiceProvider).recordFailure(
+            provider?.packageName ?? '',
+            reason: '$e',
+          );
+        } catch (_) {}
+        throw StreamResolutionException(
+          StreamResolutionFailure.loadFailed,
+          detail: '$e',
+        );
+      }
     }
   }
   if (isCancelled?.call() ?? false) {
@@ -421,6 +439,10 @@ Future<ResolvedPlayback> resolvePlayback({
       : await _firstHealthyStream(
           streams,
           startIndex: saved,
+          // A tapped row is a choice, not a candidate: a mirror answering
+          // first may still replace a row that has not answered, but once the
+          // tapped row answers it is the one that opens.
+          pinned: handPicked ? 0 : -1,
           limit: probeCandidates,
           budget: probeBudget,
           isCancelled: isCancelled,
@@ -432,7 +454,8 @@ Future<ResolvedPlayback> resolvePlayback({
   trace.lap(
     'probe',
     'enabled=$probeEnabled candidates=$probeCandidates '
-        'budget=${probeBudget.inMilliseconds}ms index=$index',
+        'budget=${probeBudget.inMilliseconds}ms '
+        'pinned=${handPicked ? 0 : -1} index=$index',
   );
   return ResolvedPlayback(
     streams: streams,
@@ -591,12 +614,17 @@ const Duration kSpeedProbeBudget = Duration(milliseconds: 1600);
 /// in line, so the source list shows every slot filled rather than a dead one
 /// left where it fell. Completing the caller's `abandon` stops it.
 ///
+/// [pinned] is a candidate the viewer picked. It never loses the race once it
+/// answers: a mirror that answered sooner while the picked row was still
+/// silent may still take its place, but one that answers after it cannot.
+///
 /// Falls back to [startIndex] if every candidate fails, so a wrong probe never
 /// blocks playback outright, and to the quickest found so far once [budget]
 /// runs out.
 Future<int> _firstHealthyStream(
   List<StreamResult> streams, {
   required int startIndex,
+  int pinned = -1,
   required int limit,
   required Duration budget,
   bool Function()? isCancelled,
@@ -606,6 +634,7 @@ Future<int> _firstHealthyStream(
 }) async {
   if (streams.isEmpty) return 0;
   final start = startIndex.clamp(0, streams.length - 1);
+  final pin = pinned >= 0 && pinned < streams.length ? pinned : -1;
 
   // Every candidate, in priority order: the preferred one, then the rest of
   // the ring after it.
@@ -717,6 +746,13 @@ Future<int> _firstHealthyStream(
 
   void decide() {
     if (completer.isCompleted) return;
+    // A picked row that answered is the answer. The check may still be
+    // waiting at mirrors below it, but a quicker one would only be opening
+    // something the viewer did not press.
+    if (pin >= 0 && (results[pin]?.outcome.reached ?? false)) {
+      finish(pin);
+      return;
+    }
     // The quickest answer wins as soon as nothing could still beat it.
     final best = fastestReached();
     if (best != null && !couldStillWin(best)) {

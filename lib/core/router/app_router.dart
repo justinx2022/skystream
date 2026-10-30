@@ -20,6 +20,7 @@ import '../../features/extensions/screens/extensions_screen.dart';
 import '../../features/nuvio/presentation/nuvio_plugins_screen.dart';
 import '../../features/settings/presentation/player_settings_screen.dart';
 import '../../features/settings/presentation/account_settings_screen.dart';
+import '../../features/settings/presentation/ai_settings_screen.dart';
 import '../../features/settings/presentation/developer_options_screen.dart';
 import '../../features/details/presentation/details_screen.dart';
 import '../../features/details/presentation/tmdb_movie_details_screen.dart';
@@ -55,6 +56,7 @@ part 'app_router.g.dart';
           path: '/settings',
           routes: [
             TypedGoRoute<PlayerSettingsRoute>(path: 'player'),
+            TypedGoRoute<AiSettingsRoute>(path: 'ai'),
             TypedGoRoute<AccountSettingsRoute>(path: 'accounts'),
             TypedGoRoute<ExtensionsRoute>(path: 'extensions'),
             TypedGoRoute<NuvioPluginsRoute>(path: 'nuvio'),
@@ -144,6 +146,13 @@ class PlayerSettingsRoute extends GoRouteData with $PlayerSettingsRoute {
   @override
   Widget build(BuildContext context, GoRouterState state) =>
       const PlayerSettingsScreen();
+}
+
+class AiSettingsRoute extends GoRouteData with $AiSettingsRoute {
+  const AiSettingsRoute();
+  @override
+  Widget build(BuildContext context, GoRouterState state) =>
+      const AiSettingsScreen();
 }
 
 class AccountSettingsRoute extends GoRouteData with $AccountSettingsRoute {

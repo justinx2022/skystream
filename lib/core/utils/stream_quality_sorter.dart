@@ -272,8 +272,25 @@ List<StreamResult> filterStreamsByQuality(
 
 /// Returns a short human-readable quality label for [stream] suitable for
 /// display as a badge in the Sources tab (e.g. "1080p", "720p", "Auto").
-String qualityBadgeLabel(StreamResult stream) {
-  switch (_detectTier(stream.source)) {
+String qualityBadgeLabel(StreamResult stream) =>
+    _badge(_detectTier(stream.source));
+
+/// The badge a resolution's height names: `800` → `720p`, `2160` → `4K`.
+///
+/// For a source that states its resolution rather than a quality word - an
+/// HLS master's `RESOLUTION=` lines - so the label can be what the stream is
+/// instead of what it was assumed to be.
+String qualityBadgeForHeight(int height) => _badge(_tierForHeight(height));
+
+/// The tier a preference names, comparable with [qualityRankForHeight].
+/// -1 for [QualityPreference.any], which means no preference at all.
+int qualityRankFor(QualityPreference preference) => preference.rank;
+
+/// The tier a height names, comparable with [qualityRankFor].
+int qualityRankForHeight(int height) => _tierForHeight(height).rank;
+
+String _badge(_QualityTier tier) {
+  switch (tier) {
     case _QualityTier.q4k:
       return '4K';
     case _QualityTier.q1440:

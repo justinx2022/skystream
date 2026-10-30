@@ -17,6 +17,8 @@ import '../../../../core/network/http_defaults.dart';
 import '../../../../core/providers/device_info_provider.dart';
 import '../../../../core/services/local_proxy_service.dart';
 import '../../../../core/services/provider_health_service.dart';
+import '../../../../core/services/neural_media_enhancer.dart';
+import '../../../settings/presentation/ai_settings_provider.dart';
 import '../../../../core/utils/app_utils.dart';
 import '../../../../core/utils/stream_quality_sorter.dart';
 import '../../../../l10n/generated/app_localizations.dart';
@@ -380,6 +382,28 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
         await native.setProperty('audio-pitch-correction', 'yes');
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
+
+        // SkyStream Neural AI Enhancements (Dahl Core)
+        final aiSettings = ref.read(aiSettingsProvider).asData?.value;
+        if (aiSettings != null && aiSettings.aiEnabled) {
+          // 1. Dialogue Isolation & Night Mode Audio Filters
+          final af = NeuralMediaEnhancer.buildAudioFilter(aiSettings);
+          if (af != null) {
+            await native.setProperty('af', af);
+          }
+          // 2. HDR10 to SDR Tone Mapping
+          for (final entry in NeuralMediaEnhancer.buildToneMappingOptions(aiSettings).entries) {
+            await native.setProperty(entry.key, entry.value);
+          }
+          // 3. Anti-Banding & Gradient Smoothing
+          for (final entry in NeuralMediaEnhancer.buildAntiBandingOptions(aiSettings).entries) {
+            await native.setProperty(entry.key, entry.value);
+          }
+          // 4. Dynamic Demuxer & Instant Seek
+          for (final entry in NeuralMediaEnhancer.buildDemuxerTuningOptions(aiSettings).entries) {
+            await native.setProperty(entry.key, entry.value);
+          }
+        }
       } catch (e) {
         if (kDebugMode) debugPrint('[MediaKit] Error configuring mpv properties: $e');
       }

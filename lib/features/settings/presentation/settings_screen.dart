@@ -190,6 +190,12 @@ class SettingsScreen extends ConsumerWidget {
           onTap: () => const PlayerSettingsRoute().go(context),
         ),
         SettingsTile(
+          icon: Icons.psychology_rounded,
+          title: 'AI Neural Engine',
+          subtitle: 'Dahl autonomous healing, shaders & stream acceleration',
+          onTap: () => const AiSettingsRoute().go(context),
+        ),
+        SettingsTile(
           icon: Icons.manage_accounts_rounded,
           title: '${l10n.accounts}, ${l10n.network} & ${l10n.downloads}',
           subtitle: 'Subtitles, tracking, network, DNS & downloads',

@@ -3,6 +3,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../logger/playback_trace.dart';
+import '../../utils/stream_quality_sorter.dart';
+import '../../../features/settings/presentation/player_settings_provider.dart';
 import '../models/addon_stream_source.dart';
 
 class DirectHlsService {
@@ -12,6 +14,19 @@ class DirectHlsService {
   static const String _defaultUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+  /// Until when the embed host is known to be refusing.
+  ///
+  /// VixSrc's embed answers `410 Gone` for whole catalogues while its API
+  /// still hands out `src` paths, so every sheet paid a round trip to find
+  /// that out on the way to playback. A 4xx arms this for a few minutes and
+  /// the leg is skipped instead of re-asked; a later 2xx clears it.
+  static DateTime? _vixsrcDownUntil;
+  static const Duration _vixsrcCooldown = Duration(minutes: 10);
+
+  /// Forgets the cooldown, so a test starts from a clean cache.
+  @visibleForTesting
+  static void resetVixSrcCooldown() => _vixsrcDownUntil = null;
+
   Future<List<AddonStreamSource>> resolveDirectStreams({
     required String? imdbId,
     required String type,
@@ -19,6 +34,7 @@ class DirectHlsService {
     int? episode,
     String? title,
     CancelToken? cancelToken,
+    QualityPreference preference = QualityPreference.any,
   }) async {
     if (imdbId == null || imdbId.isEmpty) return const [];
 
@@ -97,21 +113,27 @@ class DirectHlsService {
               // Rows are keyed on the master's variant lines - the only cheap
               // place the shared encode shows - so failover cannot spend a
               // watchdog on the same dead stream three times.
-              final keys = urls.length > 1
-                  ? await Future.wait(urls.map(_encodeKey))
-                  : List<String?>.filled(urls.length, null);
+              final read =
+                  urls.length > 1 || preference != QualityPreference.any;
+              final masters = read
+                  ? await Future.wait(urls.map(_readMaster))
+                  : List<_Master?>.filled(urls.length, null);
               final encodes = <String>{};
               for (var i = 0; i < urls.length; i++) {
-                final key = keys[i] ?? urls[i];
+                final master = masters[i];
+                final key = master?.key ?? urls[i];
                 if (!encodes.add(key)) continue;
                 if (!seen.add(urls[i])) continue;
+                final rendition = master?.pick(preference);
+                final height = rendition?.height ?? master?.largestHeight;
                 added++;
                 streams.add(AddonStreamSource(
                   addonId: 'cinepro-direct-hls',
                   addonName: 'Direct HLS',
-                  name: '⚡ [HLS] VidApi Server ${i + 1} 1080p',
+                  name: '⚡ [HLS] VidApi Server ${i + 1}'
+                      '${height == null ? '' : ' ${qualityBadgeForHeight(height)}'}',
                   title: '⚡ Instant Direct Stream',
-                  url: urls[i],
+                  url: rendition?.uri ?? urls[i],
                   proxyHeaders: const {
                     'User-Agent': _defaultUserAgent,
                   },
@@ -130,6 +152,11 @@ class DirectHlsService {
       final vixsrcFuture = () async {
         var added = 0;
         try {
+          final downUntil = _vixsrcDownUntil;
+          if (downUntil != null && DateTime.now().isBefore(downUntil)) {
+            trace.lap('vixsrc', 'skipped until ${downUntil.toIso8601String()}');
+            return;
+          }
           final isMovie = type == 'movie';
           final s = season ?? 1;
           final ep = episode ?? 1;
@@ -192,7 +219,7 @@ class DirectHlsService {
                 streams.add(AddonStreamSource(
                   addonId: 'cinepro-direct-hls',
                   addonName: 'Direct HLS',
-                  name: '⚡ [HLS] VixSrc Multi-Audio 1080p',
+                  name: '⚡ [HLS] VixSrc Multi-Audio',
                   title: '⚡ Instant Direct Stream (Multi-Audio)',
                   url: masterUrl,
                   proxyHeaders: {
@@ -206,6 +233,13 @@ class DirectHlsService {
           }
           trace.lap('vixsrc', 'links=$added');
         } catch (e) {
+          if (e is DioException &&
+              e.type != DioExceptionType.cancel &&
+              (e.response?.statusCode ?? 0) >= 400 &&
+              (e.response?.statusCode ?? 0) < 500) {
+            _vixsrcDownUntil = DateTime.now().add(_vixsrcCooldown);
+            trace.warn('vixsrc', 'refused ${e.response?.statusCode}');
+          }
           if (kDebugMode) debugPrint('[DirectHlsService] vixsrc error: $e');
           trace.warn('vixsrc', 'failed ${e.runtimeType}');
         }
@@ -227,7 +261,7 @@ class DirectHlsService {
   /// resolution of every rendition, and two tokens handed out for the same
   /// encode answer with the same lines. Null when the master cannot be read;
   /// the caller then keeps the link on its URL alone.
-  Future<String?> _encodeKey(String url) async {
+  Future<_Master?> _readMaster(String url) async {
     try {
       final res = await _dio.get<String>(
         url,
@@ -241,15 +275,68 @@ class DirectHlsService {
           },
         ),
       );
-      final variants = <String>[
-        for (final line in (res.data ?? '').split('\n'))
-          if (line.trim().toUpperCase().startsWith('#EXT-X-STREAM-INF:'))
-            line.trim(),
-      ]..sort();
+      final lines = (res.data ?? '').split('\n');
+      final base = Uri.tryParse(url);
+      final variants = <String>[];
+      final renditions = <_Rendition>[];
+      var hasAlternates = false;
+      for (var i = 0; i < lines.length; i++) {
+        final line = lines[i].trim();
+        final upper = line.toUpperCase();
+        if (upper.startsWith('#EXT-X-MEDIA:')) hasAlternates = true;
+        if (!upper.startsWith('#EXT-X-STREAM-INF:')) continue;
+        variants.add(line);
+        final uri = _variantUri(lines, i + 1, base);
+        if (uri == null) continue;
+        renditions.add(_Rendition(
+          uri,
+          _heightOf(_attribute(line, 'RESOLUTION')),
+          int.tryParse(_attribute(line, 'BANDWIDTH') ?? '') ?? 0,
+        ));
+      }
       if (variants.isEmpty) return null;
-      return variants.join('|');
+      variants.sort();
+      return _Master(
+        variants.join('|'),
+        renditions,
+        hasAlternates: hasAlternates,
+      );
     } catch (_) {
       return null;
     }
+  }
+
+  String? _variantUri(List<String> lines, int from, Uri? base) {
+    for (var i = from; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('#')) return null;
+      if (base == null) return line;
+      return _absolute(base, line);
+    }
+    return null;
+  }
+
+  /// [ref] made absolute, carrying [base]'s query when it has none: these
+  /// masters hold the token in the query and write the variants as paths.
+  String _absolute(Uri base, String ref) {
+    final uri = base.resolve(ref);
+    if (uri.query.isNotEmpty || base.query.isEmpty) return uri.toString();
+    return uri.replace(query: base.query).toString();
+  }
+
+  String? _attribute(String line, String name) {
+    final match = RegExp(
+      '(?:^|[:,])${RegExp.escape(name)}=\\s*([^,]*)',
+      caseSensitive: false,
+    ).firstMatch(line);
+    final value = match?.group(1)?.trim();
+    return value == null || value.isEmpty ? null : value.replaceAll('"', '');
+  }
+
+  int? _heightOf(String? resolution) {
+    if (resolution == null) return null;
+    final parts = resolution.toLowerCase().split('x');
+    return parts.length == 2 ? int.tryParse(parts[1].trim()) : null;
   }
 }
