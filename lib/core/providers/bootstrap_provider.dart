@@ -49,14 +49,12 @@ Future<void> quietDesktopBrightness() async {
   // the second attempt either, and retrying is the behaviour being removed.
   _desktopBrightnessQuieted = true;
   try {
-    await ScreenBrightness().setAutoReset(false);
+    // Only macOS has an implementation of this plugin on desktop.
+    // Linux ships no implementation at all, and Windows registers no channel handler.
+    if (Platform.isMacOS) {
+      await ScreenBrightness().setAutoReset(false);
+    }
   } catch (e) {
-    // Expected on two of the three desktops, not a defect. Linux ships no
-    // implementation of this plugin at all, and on Windows the vendored stub
-    // in packages/screen_brightness_windows registers nothing - so both throw
-    // MissingPluginException here on every launch. That is the benign case: a
-    // platform with no plugin has no DDC/CI to stop. macOS is the one desktop
-    // where this call does real work.
     talker.warning('Bootstrap: could not disable brightness auto-reset', e);
   }
 }

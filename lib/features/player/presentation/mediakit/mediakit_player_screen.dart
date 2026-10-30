@@ -199,6 +199,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   final FocusNode _focusNode = FocusNode();
 
+  ProviderContainer? _container;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _container = ProviderScope.containerOf(context, listen: false);
+  }
+
+  T _read<T>(ProviderListenable<T> provider) {
+    final container = _container;
+    if (container != null) {
+      return container.read(provider);
+    }
+    return ref.read(provider);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -218,7 +234,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _item = widget.item;
     if ((_item.episodes == null || _item.episodes!.isEmpty) && widget.item.url.isNotEmpty) {
       try {
-        final cached = ref.read(detailsControllerProvider(widget.item.url)).details.asData?.value;
+        final cached = _read(detailsControllerProvider(widget.item.url)).details.asData?.value;
         if (cached != null && cached.episodes != null && cached.episodes!.isNotEmpty) {
           _item = cached;
         }
@@ -226,7 +242,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     }
 
     _currentVideoUrl = widget.videoUrl;
-    _settings = ref.read(playerSettingsProvider).asData?.value;
+    _settings = _read(playerSettingsProvider).asData?.value;
     _fit = _fitFromSettings(_settings?.defaultResizeMode ?? 'Fit');
     _currentEpisode = widget.episode ??
         _item.episodes?.firstWhereOrNull((e) {
@@ -251,7 +267,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     );
 
     _sideCars = SideCarSubtitles(
-      fetch: (url, headers) => ref.read(sideCarFetchProvider)(url, headers),
+      fetch: (url, headers) => _read(sideCarFetchProvider)(url, headers),
       onUnreadable: _handSideCarToEngine,
     );
     _sideCars.addListener(_onSideCars);
@@ -293,8 +309,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// the same one.
   ({int megabytes, int seconds}) _bufferPlan() {
     final settings =
-        ref.read(playerSettingsProvider).asData?.value ?? _settings;
-    final tier = ref.read(deviceProfileProvider).asData?.value.tier ??
+        _read(playerSettingsProvider).asData?.value ?? _settings;
+    final tier = _read(deviceProfileProvider).asData?.value.tier ??
         DeviceTier.standard;
     return (
       megabytes: resolveNetworkBufferMb(
@@ -382,7 +398,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         await native.setProperty('user-agent', kDefaultBrowserUserAgent);
 
         // SkyStream Neural AI Enhancements (Dahl Core)
-        final aiSettings = ref.read(aiSettingsProvider).asData?.value;
+        final aiSettings = _read(aiSettingsProvider).asData?.value;
         if (aiSettings != null && aiSettings.aiEnabled) {
           // 1. Dialogue Isolation & Night Mode Audio Filters
           final af = NeuralMediaEnhancer.buildAudioFilter(aiSettings);
@@ -474,7 +490,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _advancing = true;
     try {
       _tracker?.finish();
-      rollForwardHistory(read: ref.read, item: _item, next: next);
+      rollForwardHistory(read: _read, item: _item, next: next);
       await _startEpisode(next);
     } finally {
       _advancing = false;
@@ -805,11 +821,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     final id = _attemptProviderId;
     if (id.isEmpty) return;
     final enabled =
-        ref.read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
+        _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
             true;
     if (!enabled) return;
     try {
-      final health = ref.read(providerHealthServiceProvider);
+      final health = _read(providerHealthServiceProvider);
       if (success) {
         health.recordSuccess(id, responseTime: responseTime);
       } else {
@@ -841,14 +857,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     try {
       final ep = _effectiveCurrentEpisode;
       final resumeLookup = resolveResumePoint(
-        read: ref.read,
+        read: _read,
         item: _item,
         episode: ep,
         videoUrl: _currentVideoUrl,
       );
 
       final localResume = resumePointFor(
-        read: ref.read,
+        read: _read,
         item: _item,
         episode: ep,
         videoUrl: _currentVideoUrl,
@@ -866,7 +882,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _trace?.lap('resume');
 
       final resolved = await resolvePlayback(
-        read: ref.read,
+        read: _read,
         item: _item,
         videoUrl: _currentVideoUrl,
         preloadedStreams: _currentVideoUrl == widget.videoUrl ? widget.preloadedStreams : null,
@@ -879,12 +895,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // and failover still covers one that turns out dead.
         // When AI Intent Pre-Fetch is active, bypass the 1.6s speed probe delay
         // to achieve instant time-to-first-frame handshake.
-        probeCandidates: (ref.read(aiSettingsProvider).asData?.value.aiEnabled == true &&
-                ref.read(aiSettingsProvider).asData?.value.intentPreFetch == true)
+        probeCandidates: (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+                _read(aiSettingsProvider).asData?.value.intentPreFetch == true)
             ? 1
             : (await isOnMeteredNetwork() ? 1 : kSpeedProbeCandidates),
-        probeBudget: (ref.read(aiSettingsProvider).asData?.value.aiEnabled == true &&
-                ref.read(aiSettingsProvider).asData?.value.intentPreFetch == true)
+        probeBudget: (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+                _read(aiSettingsProvider).asData?.value.intentPreFetch == true)
             ? const Duration(milliseconds: 250)
             : kSpeedProbeBudget,
         isCancelled: () => _disposed,
@@ -904,7 +920,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
       _token++;
       _recorder = PlaybackProgressRecorder(
-        read: ref.read,
+        read: _read,
         item: _item,
         episode: ep,
         videoUrl: _currentVideoUrl,
@@ -912,7 +928,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       );
 
       _tracker = PlaybackTracker(
-        read: ref.read,
+        read: _read,
         item: _item,
         episode: ep,
         videoUrl: _currentVideoUrl,
@@ -1257,14 +1273,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _viewerChoseSubtitle = false;
     _subtitleOffAsked = null;
     final settings =
-        ref.read(playerSettingsProvider).asData?.value ??
+        _read(playerSettingsProvider).asData?.value ??
         const PlayerSettings();
     _subtitlesOffPending = settings.subtitleDefault == SubtitleDefault.off;
     if (_subtitlesOffPending || _sideCars.active != null) return;
 
     final preferred = preferredSubtitleIndex(
       [for (final track in tracks) track.languageCode],
-      ref.read(subtitleLanguageProvider),
+      _read(subtitleLanguageProvider),
     );
     if (preferred != null) {
       unawaited(_sideCars.select(tracks[preferred], from: startAt));
@@ -1604,7 +1620,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   }
 
   void _cleanupPlatformOnExit() {
-    _player.stop();
+    try {
+      _player.stop();
+    } catch (_) {}
     if (!kIsWeb && Platform.isAndroid) {
       try {
         WakelockPlus.disable();
@@ -1639,25 +1657,53 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   @override
   void dispose() {
     _disposed = true;
-    WidgetsBinding.instance.removeObserver(this);
+    try {
+      WidgetsBinding.instance.removeObserver(this);
+    } catch (_) {}
     _hideControlsTimer?.cancel();
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
     _startupWatchdog?.cancel();
     for (final s in _subscriptions) {
-      s.cancel();
+      try {
+        s.cancel();
+      } catch (_) {}
     }
     _subscriptions.clear();
-    _recordFinalProgress();
-    _tracker?.finish();
-    _cleanupPlatformOnExit();
-    _sideCars.removeListener(_onSideCars);
-    _sideCars.dispose();
-    _subtitlePlayback.dispose();
-    _embeddedSubtitles.dispose();
-    _activeEmbeddedSubtitle.dispose();
-    _player.dispose();
-    _focusNode.dispose();
+    try {
+      _recordFinalProgress();
+    } catch (e, st) {
+      talker.error('Error during _recordFinalProgress in dispose', e, st);
+    }
+    try {
+      _tracker?.finish();
+    } catch (e, st) {
+      talker.error('Error during _tracker.finish in dispose', e, st);
+    }
+    try {
+      _cleanupPlatformOnExit();
+    } catch (e, st) {
+      talker.error('Error during _cleanupPlatformOnExit in dispose', e, st);
+    }
+    try {
+      _sideCars.removeListener(_onSideCars);
+      _sideCars.dispose();
+    } catch (_) {}
+    try {
+      _subtitlePlayback.dispose();
+    } catch (_) {}
+    try {
+      _embeddedSubtitles.dispose();
+    } catch (_) {}
+    try {
+      _activeEmbeddedSubtitle.dispose();
+    } catch (_) {}
+    try {
+      _player.dispose();
+    } catch (_) {}
+    try {
+      _focusNode.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
