@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/theme/hotstar_theme.dart';
 import '../../../core/utils/layout_constants.dart';
 import 'ai_settings_provider.dart';
 import 'widgets/settings_widgets.dart';
@@ -19,9 +18,9 @@ class AiSettingsScreen extends ConsumerWidget {
         title: const Text('AI Neural Engine'),
       ),
       body: aiAsync.when(
-        data: (settings) => _buildBody(context, ref, settings),
+        data: (AiSettings settings) => _buildBody(context, ref, settings),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (Object e, StackTrace _) => Center(child: Text('Error: $e')),
       ),
     );
   }
@@ -51,11 +50,11 @@ class AiSettingsScreen extends ConsumerWidget {
                       : 'Disabled (standard native playback)',
                   trailing: Switch(
                     value: settings.aiEnabled,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(aiEnabled: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(aiEnabled: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(aiEnabled: !settings.aiEnabled),
+                    (AiSettings s) => s.copyWith(aiEnabled: !settings.aiEnabled),
                   ),
                 ),
                 SettingsTile(
@@ -81,11 +80,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Pre-resolves links on hover for sub-300ms startup',
                   trailing: Switch(
                     value: settings.intentPreFetch,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(intentPreFetch: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(intentPreFetch: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(intentPreFetch: !settings.intentPreFetch),
+                    (AiSettings s) => s.copyWith(intentPreFetch: !settings.intentPreFetch),
                   ),
                 ),
                 SettingsTile(
@@ -94,11 +93,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Splits requests across high-speed Google/PixelDrain mirrors',
                   trailing: Switch(
                     value: settings.multiCdnSharding,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(multiCdnSharding: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(multiCdnSharding: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(multiCdnSharding: !settings.multiCdnSharding),
+                    (AiSettings s) => s.copyWith(multiCdnSharding: !settings.multiCdnSharding),
                   ),
                 ),
                 SettingsTile(
@@ -107,12 +106,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Expands mpv buffer up to 150MB & sets fast probe size',
                   trailing: Switch(
                     value: settings.dynamicDemuxerTuning,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(dynamicDemuxerTuning: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(dynamicDemuxerTuning: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       dynamicDemuxerTuning: !settings.dynamicDemuxerTuning,
                     ),
                   ),
@@ -124,12 +123,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   isLast: true,
                   trailing: Switch(
                     value: settings.seekKeyframePreCache,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(seekKeyframePreCache: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(seekKeyframePreCache: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       seekKeyframePreCache: !settings.seekKeyframePreCache,
                     ),
                   ),
@@ -148,12 +147,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Real-time AI upscaling with sharp lines & edge refinement',
                   trailing: Switch(
                     value: settings.neuralSuperResolution,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(neuralSuperResolution: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(neuralSuperResolution: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       neuralSuperResolution: !settings.neuralSuperResolution,
                     ),
                   ),
@@ -164,11 +163,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Injects BT.2446a perceptual curves for punchy colors on standard displays',
                   trailing: Switch(
                     value: settings.hdrToneMapping,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(hdrToneMapping: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(hdrToneMapping: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(hdrToneMapping: !settings.hdrToneMapping),
+                    (AiSettings s) => s.copyWith(hdrToneMapping: !settings.hdrToneMapping),
                   ),
                 ),
                 SettingsTile(
@@ -178,11 +177,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   isLast: true,
                   trailing: Switch(
                     value: settings.antiBanding,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(antiBanding: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(antiBanding: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(antiBanding: !settings.antiBanding),
+                    (AiSettings s) => s.copyWith(antiBanding: !settings.antiBanding),
                   ),
                 ),
               ],
@@ -199,12 +198,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Isolates dialogue frequencies so speech is clear over loud effects',
                   trailing: Switch(
                     value: settings.dialogueIsolation,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(dialogueIsolation: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(dialogueIsolation: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       dialogueIsolation: !settings.dialogueIsolation,
                     ),
                   ),
@@ -215,11 +214,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Tames explosive volume spikes without muffling quiet whispers',
                   trailing: Switch(
                     value: settings.nightModeAudio,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(nightModeAudio: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(nightModeAudio: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(nightModeAudio: !settings.nightModeAudio),
+                    (AiSettings s) => s.copyWith(nightModeAudio: !settings.nightModeAudio),
                   ),
                 ),
                 SettingsTile(
@@ -229,11 +228,11 @@ class AiSettingsScreen extends ConsumerWidget {
                   isLast: true,
                   trailing: Switch(
                     value: settings.multiAudioSync,
-                    onChanged: (val) =>
-                        notifier.update((s) => s.copyWith(multiAudioSync: val)),
+                    onChanged: (bool val) =>
+                        notifier.update((AiSettings s) => s.copyWith(multiAudioSync: val)),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(multiAudioSync: !settings.multiAudioSync),
+                    (AiSettings s) => s.copyWith(multiAudioSync: !settings.multiAudioSync),
                   ),
                 ),
               ],
@@ -250,12 +249,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Automatically parses mutated website redirects on the fly',
                   trailing: Switch(
                     value: settings.selfHealingScrapers,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(selfHealingScrapers: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(selfHealingScrapers: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       selfHealingScrapers: !settings.selfHealingScrapers,
                     ),
                   ),
@@ -266,12 +265,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   subtitle: 'Negotiates missing Referer or User-Agent headers with CDNs',
                   trailing: Switch(
                     value: settings.autoFixForbiddenHeaders,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(autoFixForbiddenHeaders: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(autoFixForbiddenHeaders: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       autoFixForbiddenHeaders: !settings.autoFixForbiddenHeaders,
                     ),
                   ),
@@ -283,12 +282,12 @@ class AiSettingsScreen extends ConsumerWidget {
                   isLast: true,
                   trailing: Switch(
                     value: settings.ghostLinkResurrection,
-                    onChanged: (val) => notifier.update(
-                      (s) => s.copyWith(ghostLinkResurrection: val),
+                    onChanged: (bool val) => notifier.update(
+                      (AiSettings s) => s.copyWith(ghostLinkResurrection: val),
                     ),
                   ),
                   onTap: () => notifier.update(
-                    (s) => s.copyWith(
+                    (AiSettings s) => s.copyWith(
                       ghostLinkResurrection: !settings.ghostLinkResurrection,
                     ),
                   ),
@@ -307,9 +306,9 @@ class AiSettingsScreen extends ConsumerWidget {
     String currentKey,
   ) {
     final controller = TextEditingController(text: currentKey);
-    showDialog(
+    showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('Custom Dahl API Key'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -332,15 +331,15 @@ class AiSettingsScreen extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () {
               ref
                   .read(aiSettingsProvider.notifier)
-                  .update((s) => s.copyWith(dahlApiKey: controller.text.trim()));
-              Navigator.pop(context);
+                  .update((AiSettings s) => s.copyWith(dahlApiKey: controller.text.trim()));
+              Navigator.pop(dialogContext);
             },
             child: const Text('Save'),
           ),

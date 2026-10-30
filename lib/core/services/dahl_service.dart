@@ -15,7 +15,7 @@ class DahlService {
       baseUrl: 'https://inference.dahl.global/v1',
       connectTimeout: const Duration(milliseconds: 3500),
       receiveTimeout: const Duration(milliseconds: 6000),
-      headers: {
+      headers: <String, dynamic>{
         'Content-Type': 'application/json',
         'User-Agent': 'SkyStream-NeuralCore/2.0',
       },
@@ -25,19 +25,24 @@ class DahlService {
   final Ref _ref;
   late final Dio _dio;
 
+  AiSettings _getSettings() {
+    final asyncVal = _ref.read<AsyncValue<AiSettings>>(aiSettingsProvider);
+    return asyncVal.asData?.value ?? const AiSettings();
+  }
+
   String get _apiKey {
-    final userKey = _ref.read(aiSettingsProvider).asData?.value.dahlApiKey.trim() ?? '';
+    final userKey = _getSettings().dahlApiKey.trim();
     if (userKey.isNotEmpty) return userKey;
     // Built-in fallback Dahl access token
     return 'dahl_48n52n3839201938PDqj';
   }
 
   String get _model {
-    return _ref.read(aiSettingsProvider).asData?.value.dahlModel ?? 'MiniMaxAI/MiniMax-M2.7';
+    return _getSettings().dahlModel;
   }
 
   bool get _isEnabled {
-    return _ref.read(aiSettingsProvider).asData?.value.aiEnabled ?? true;
+    return _getSettings().aiEnabled;
   }
 
   /// Sends a low-latency prompt to Dahl.
@@ -49,21 +54,29 @@ class DahlService {
   }) async {
     if (!_isEnabled) return null;
     try {
-      final res = await _dio.post(
+      final res = await _dio.post<dynamic>(
         '/chat/completions',
-        options: Options(headers: {'Authorization': 'Bearer $_apiKey'}),
-        data: {
+        options: Options(headers: <String, dynamic>{'Authorization': 'Bearer $_apiKey'}),
+        data: <String, dynamic>{
           'model': overrideModel ?? _model,
-          'messages': [
-            {'role': 'user', 'content': prompt}
+          'messages': <Map<String, String>>[
+            <String, String>{'role': 'user', 'content': prompt}
           ],
           'max_tokens': maxTokens,
           'temperature': temperature,
         },
       );
       if (res.statusCode == 200 && res.data != null) {
-        final data = res.data is String ? jsonDecode(res.data) : res.data;
-        return data['choices']?[0]?['message']?['content']?.toString().trim();
+        final dynamic data = res.data is String ? jsonDecode(res.data as String) : res.data;
+        if (data is Map) {
+          final choices = data['choices'];
+          if (choices is List && choices.isNotEmpty) {
+            final first = choices.first;
+            if (first is Map && first['message'] is Map) {
+              return first['message']['content']?.toString().trim();
+            }
+          }
+        }
       }
     } catch (e) {
       debugPrint('[DahlService] Inference failed: $e');
@@ -76,8 +89,8 @@ class DahlService {
     required String rawSnippet,
     required String streamHint,
   }) async {
-    final settings = _ref.read(aiSettingsProvider).asData?.value;
-    if (settings != null && !settings.selfHealingScrapers) return null;
+    final settings = _getSettings();
+    if (!settings.selfHealingScrapers) return null;
 
     final prompt =
         'Extract the direct playable video link (HLS .m3u8, MP4, or worker direct link) '
@@ -97,8 +110,8 @@ class DahlService {
     required String url,
     required Map<String, String> currentHeaders,
   }) async {
-    final settings = _ref.read(aiSettingsProvider).asData?.value;
-    if (settings != null && !settings.autoFixForbiddenHeaders) return null;
+    final settings = _getSettings();
+    if (!settings.autoFixForbiddenHeaders) return null;
 
     final uri = Uri.tryParse(url);
     if (uri == null) return null;
@@ -116,7 +129,9 @@ class DahlService {
         final jsonEnd = out.lastIndexOf('}');
         if (jsonStart != -1 && jsonEnd != -1) {
           final decoded = jsonDecode(out.substring(jsonStart, jsonEnd + 1));
-          return Map<String, String>.from(decoded);
+          if (decoded is Map) {
+            return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+          }
         }
       } catch (_) {}
     }

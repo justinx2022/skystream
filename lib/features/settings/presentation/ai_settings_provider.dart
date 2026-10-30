@@ -105,7 +105,7 @@ class AiSettings {
     );
   }
 
-  Map<String, dynamic> toMap() => {
+  Map<String, dynamic> toMap() => <String, dynamic>{
         'aiEnabled': aiEnabled,
         'dahlApiKey': dahlApiKey,
         'dahlModel': dahlModel,
@@ -150,41 +150,36 @@ class AiSettings {
       );
 }
 
-class AiSettingsNotifier extends StateNotifier<AsyncValue<AiSettings>> {
-  AiSettingsNotifier(this._ref) : super(const AsyncValue.loading()) {
-    _load();
-  }
-
-  final Ref _ref;
+class AiSettingsNotifier extends Notifier<AsyncValue<AiSettings>> {
   static const String keyName = 'skystream_ai_settings_json';
 
-  void _load() {
+  @override
+  AsyncValue<AiSettings> build() {
     try {
-      final repository = _ref.read(settingsRepositoryProvider);
+      final repository = ref.read(settingsRepositoryProvider);
       final raw = repository.getPlayerSetting<String>(keyName);
       if (raw != null && raw.isNotEmpty) {
         final map = jsonDecode(raw) as Map<String, dynamic>;
-        state = AsyncValue.data(AiSettings.fromMap(map));
-        return;
+        return AsyncValue.data(AiSettings.fromMap(map));
       }
-      state = const AsyncValue.data(AiSettings());
+      return const AsyncValue.data(AiSettings());
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      return AsyncValue.error(e, st);
     }
   }
 
-  Future<void> update(AiSettings Function(AiSettings) mutate) async {
+  Future<void> update(AiSettings Function(AiSettings s) mutate) async {
     final current = state.asData?.value ?? const AiSettings();
     final updated = mutate(current);
     state = AsyncValue.data(updated);
     try {
-      final repository = _ref.read(settingsRepositoryProvider);
+      final repository = ref.read(settingsRepositoryProvider);
       await repository.setPlayerSetting<String>(keyName, jsonEncode(updated.toMap()));
     } catch (_) {}
   }
 }
 
 final aiSettingsProvider =
-    StateNotifierProvider<AiSettingsNotifier, AsyncValue<AiSettings>>((ref) {
-  return AiSettingsNotifier(ref);
-});
+    NotifierProvider<AiSettingsNotifier, AsyncValue<AiSettings>>(
+  AiSettingsNotifier.new,
+);
