@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/utils/layout_constants.dart';
 import 'ai_settings_provider.dart';
 import 'widgets/settings_widgets.dart';
@@ -291,6 +293,23 @@ class AiSettingsScreen extends ConsumerWidget {
                       ghostLinkResurrection: !settings.ghostLinkResurrection,
                     ),
                   ),
+                ),
+              ],
+            ),
+            const SizedBox(height: LayoutConstants.spacingLg),
+
+            // Live Engine Diagnostics & Perf Logs
+            SettingsGroup(
+              title: 'DIAGNOSTICS & PERFORMANCE LOGS',
+              children: [
+                SettingsTile(
+                  icon: Icons.receipt_long_rounded,
+                  title: 'View Engine & AI Diagnostics',
+                  subtitle: 'Inspect live [perf] playback traces, TTFF latency, and network events',
+                  isLast: true,
+                  onTap: () {
+                    unawaited(const AppLogsRoute().push<void>(context));
+                  },
                 ),
               ],
             ),

@@ -349,9 +349,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
 
-          // CRITICAL: Stop libmpv from deep probing on local loopback
-          await native.setProperty('demuxer-lavf-probesize', '500000');    // 500KB max probe
-          await native.setProperty('demuxer-lavf-analyzeduration', '1000000'); // 1ms max analyze
+          // Fast container analysis for instant playback
+          await native.setProperty('demuxer-lavf-probesize', '131072');    // 128KB fast probe
+          await native.setProperty('demuxer-lavf-analyzeduration', '150000'); // 150ms max analyze
           await native.setProperty('network-timeout', '10');                // 10s connect timeout
 
           // Treat localhost as local (disable network buffering logic)
@@ -879,8 +879,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // That check is a handful of range requests nobody asked for, so it is
         // skipped on a metered link: the preferred source opens as it stands,
         // and failover still covers one that turns out dead.
-        probeCandidates: await isOnMeteredNetwork() ? 1 : kSpeedProbeCandidates,
-        probeBudget: kSpeedProbeBudget,
+        // When AI Intent Pre-Fetch is active, bypass the 1.6s speed probe delay
+        // to achieve instant time-to-first-frame handshake.
+        probeCandidates: (ref.read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+                ref.read(aiSettingsProvider).asData?.value.intentPreFetch == true)
+            ? 1
+            : (await isOnMeteredNetwork() ? 1 : kSpeedProbeCandidates),
+        probeBudget: (ref.read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+                ref.read(aiSettingsProvider).asData?.value.intentPreFetch == true)
+            ? const Duration(milliseconds: 250)
+            : kSpeedProbeBudget,
         isCancelled: () => _disposed,
         onCandidates: (streams) {
           if (mounted) setState(() => _candidates = streams);

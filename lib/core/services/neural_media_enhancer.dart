@@ -58,11 +58,10 @@ class NeuralMediaEnhancer {
   static Map<String, String> buildDemuxerTuningOptions(AiSettings settings) {
     if (!settings.aiEnabled || !settings.dynamicDemuxerTuning) return const {};
     return const {
-      'demuxer-lavf-probesize': '32768',
-      'demuxer-readahead-secs': '90',
-      'demuxer-max-bytes': '157286400', // 150MB buffer
+      'demuxer-lavf-probesize': '131072',
+      'demuxer-lavf-analyzeduration': '150000', // 150ms instant container analysis
       'hr-seek': 'yes',
-      'hr-seek-framedrop': 'no',
+      'hr-seek-framedrop': 'yes', // Drop intermediate frames for instantaneous scrubbing
     };
   }
 }

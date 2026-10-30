@@ -34,7 +34,7 @@ class DahlService {
     final userKey = _getSettings().dahlApiKey.trim();
     if (userKey.isNotEmpty) return userKey;
     // Built-in fallback Dahl access token
-    return 'dahl_48n52n3839201938PDqj';
+    return 'dahl_48nTkdXh1B3npFCoFcLdjTHPG1V6kPDqj';
   }
 
   String get _model {
