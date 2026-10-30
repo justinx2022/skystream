@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart'
+    show ProviderListenable;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -1880,17 +1882,17 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     try {
       _recordFinalProgress();
     } catch (e, st) {
-      talker.error('Error during _recordFinalProgress in dispose', e, st);
+      if (kDebugMode) debugPrint('Error during _recordFinalProgress in dispose: $e\n$st');
     }
     try {
       _tracker?.finish();
     } catch (e, st) {
-      talker.error('Error during _tracker.finish in dispose', e, st);
+      if (kDebugMode) debugPrint('Error during _tracker.finish in dispose: $e\n$st');
     }
     try {
       _cleanupPlatformOnExit();
     } catch (e, st) {
-      talker.error('Error during _cleanupPlatformOnExit in dispose', e, st);
+      if (kDebugMode) debugPrint('Error during _cleanupPlatformOnExit in dispose: $e\n$st');
     }
     try {
       _sideCars.removeListener(_onSideCars);
