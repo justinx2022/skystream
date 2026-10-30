@@ -30,7 +30,6 @@ import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../core/services/provider_health_service.dart';
 import '../../../core/services/dahl_service.dart';
-import '../../settings/presentation/ai_settings_provider.dart';
 import '../../library/presentation/history_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
@@ -330,7 +329,7 @@ Future<ResolvedPlayback> resolvePlayback({
   // tapped source first and have ranked the rest themselves.
   final handPicked = preloaded.isNotEmpty;
 
-  List<StreamResult> raw;
+  List<StreamResult> raw = const <StreamResult>[];
   if (handPicked) {
     raw = preloaded;
   } else {

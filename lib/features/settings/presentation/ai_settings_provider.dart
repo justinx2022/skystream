@@ -174,7 +174,7 @@ class AiSettingsNotifier extends Notifier<AsyncValue<AiSettings>> {
     state = AsyncValue.data(updated);
     try {
       final repository = ref.read(settingsRepositoryProvider);
-      await repository.setPlayerSetting<String>(keyName, jsonEncode(updated.toMap()));
+      await repository.setPlayerSetting(keyName, jsonEncode(updated.toMap()));
     } catch (_) {}
   }
 }
