@@ -323,7 +323,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
           await native.setProperty('network-timeout', '10');
           await native.setProperty('stream-lavf-o', 'timeout=10000000');
-          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
+          await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         } else if (!kIsWeb && Platform.isWindows) {
           await native.setProperty('hwdec', 'auto-safe');
 
@@ -354,7 +354,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
           // Treat localhost as local (disable network buffering logic)
           await native.setProperty('stream-lavf-o', 'timeout=10000000');
-          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
+          await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         }
 
         if (_settings?.hardwareDecoding == false) {
@@ -1010,6 +1010,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
         await native.setProperty('referer', referer ?? '');
+        final extraFields = <String>[];
+        headers.forEach((k, v) {
+          final lk = k.toLowerCase();
+          if (lk != 'referer' && lk != 'user-agent') {
+            extraFields.add('$k: $v');
+          }
+        });
+        await native.setProperty('http-header-fields', extraFields.join(','));
       }
 
       await _player.open(Media(url, httpHeaders: headers, start: at), play: true);
@@ -1050,6 +1058,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         url,
         headers: headers,
       );
+      if (_player.platform is NativePlayer) {
+        final native = _player.platform as NativePlayer;
+        await native.setProperty('referer', '');
+        await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
+      }
       await _player.open(
         Media(proxyUrl, httpHeaders: headers, start: at),
         play: true,

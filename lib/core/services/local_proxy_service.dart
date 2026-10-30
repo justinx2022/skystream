@@ -1071,20 +1071,29 @@ class LocalProxyService {
             return line;
           }
 
-          // Segment URL: collect resolved target URL for parallel prefetcher
-          try {
-            final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
-            segments.add(target);
-          } catch (_) {}
+          // Check if this line is a sub-playlist (.m3u8 / .m3u) or an actual media segment
+          final lower = trimmed.toLowerCase();
+          final isChildPlaylist = lower.contains('.m3u8') ||
+              lower.contains('.m3u') ||
+              lower.contains('playlist.php') ||
+              lower.contains('play.php');
+
+          if (!isChildPlaylist) {
+            // Segment URL: collect resolved target URL for parallel prefetcher
+            try {
+              final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
+              segments.add(target);
+            } catch (_) {}
+          }
 
           final r = _rewriteUrl(
             trimmed,
             baseUrl,
             stickyHeaders,
             options,
-            isSegment: true,
+            isSegment: !isChildPlaylist,
           );
-          // debugPrint("[PROXY] Rewrote Segment: $trimmed");
+          // debugPrint("[PROXY] Rewrote: $trimmed (isSegment: ${!isChildPlaylist})");
           return r;
         })
         .join('\n');
