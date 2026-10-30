@@ -123,16 +123,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// Nine seconds without the clock moving is well past a cold start and far
   /// short of the engine's own patience; when another mirror exists, moving
   /// to it beats leaving the viewer on a spinner.
-  static const Duration _kSilentOpenWatchdog = Duration(seconds: 9);
+  static const Duration _kSilentOpenWatchdog = Duration(seconds: 14);
 
-  /// The same leash for an HLS source, and less than half as long.
+  /// The same leash for an HLS source.
   ///
-  /// A playlist that opens but never demuxes is what a dead "direct" HLS link
-  /// looks like - the master answers in milliseconds, the segments are what
-  /// is not there - and those come in rows. Four seconds still covers a cold
-  /// playlist fetch; the extra five bought nothing but spinner, because the
-  /// proxy's turn and the failover that follows both end in the same 403.
-  static const Duration _kSilentOpenWatchdogHls = Duration(seconds: 4);
+  /// Multi-variant master playlists require resolving child variants (360p, 720p, 1080p)
+  /// and downloading the first segment chunk over TLS. 12 seconds provides sufficient
+  /// runway to prevent premature watchdog cancellation on standard networks.
+  static const Duration _kSilentOpenWatchdogHls = Duration(seconds: 12);
 
   /// Stage timings for the current start, so `/logs` can say where the time
   /// went without a debugger attached.

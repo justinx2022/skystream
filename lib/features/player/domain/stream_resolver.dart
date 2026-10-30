@@ -31,6 +31,7 @@ import '../../../l10n/generated/app_localizations.dart';
 import '../../../core/services/provider_health_service.dart';
 import '../../../core/services/dahl_service.dart';
 import '../../library/presentation/history_provider.dart';
+import '../../settings/presentation/ai_settings_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
 /// Just enough of Riverpod to read providers. Both `Ref.read` and
@@ -424,10 +425,18 @@ Future<ResolvedPlayback> resolvePlayback({
   // (the player keeps it so) because nothing else here waits on it.
   var probeEnabled = true;
   try {
-    probeEnabled =
-        (settings ?? read(playerSettingsProvider).asData?.value)
-            ?.autoHealthScoringEnabled ??
-        true;
+    final aiSettings = read(aiSettingsProvider).asData?.value;
+    if (aiSettings?.aiEnabled == true) {
+      // In AI Neural mode, disable synthetic HTTP range pre-probing entirely.
+      // Synthetic probes trigger CDN bot protections (403/405), causing the resolver
+      // to falsely discard top-quality 1080p/4K links in favor of unprotected low-tier mirrors.
+      probeEnabled = false;
+    } else {
+      probeEnabled =
+          (settings ?? read(playerSettingsProvider).asData?.value)
+              ?.autoHealthScoringEnabled ??
+          true;
+    }
   } catch (_) {}
 
   final saved = handPicked ? 0 : _savedStreamIndex(read, item, streams);
@@ -905,6 +914,11 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
             )
           : const <int>[];
       return _ProbeAnswer(_outcomeOf(uri, resp, head), ttfb);
+    }
+    // CDNs (Cloudflare, Akamai) often reject synthetic probes with 403 Forbidden
+    // while streaming perfectly in full media player engines.
+    if (resp.statusCode == 403 || resp.statusCode == 405) {
+      return _ProbeAnswer(ProbeOutcome.healthy, ttfb);
     }
   } catch (_) {
     // Fall through to the HEAD.

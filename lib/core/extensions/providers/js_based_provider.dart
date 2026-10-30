@@ -179,7 +179,9 @@ class JsBasedProvider extends SkyStreamProvider {
   // Per-sub-provider bytecode path. Only valid for file-based (non-asset) plugins.
   String? get _qbcPath {
     if (_scriptPath.startsWith('assets/')) return null;
-    final dir = _scriptPath.substring(0, _scriptPath.lastIndexOf('/') + 1);
+    final lastSlash = _scriptPath.lastIndexOf(RegExp(r'[/\\]'));
+    final dir = lastSlash >= 0 ? _scriptPath.substring(0, lastSlash + 1) : '';
+    if (dir.isEmpty) return null;
     final safeId = (_namespace ?? _packageName).replaceAll(
       RegExp(r'[^a-zA-Z0-9_]'),
       '_',
