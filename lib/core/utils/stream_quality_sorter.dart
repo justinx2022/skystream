@@ -3,9 +3,9 @@ import 'package:skystream/l10n/generated/app_localizations.dart';
 import '../../features/settings/presentation/player_settings_provider.dart';
 import '../domain/entity/multimedia_item.dart';
 
-/// Internal quality tier, derived by parsing a source's label string.
+/// Quality tier, derived by parsing a source's label string or video demux properties.
 /// Order matters — higher index = higher quality.
-enum _QualityTier {
+enum QualityTier {
   unknown, // no detectable quality info
   q360,
   q480,
@@ -15,8 +15,27 @@ enum _QualityTier {
   q4k,
 }
 
-extension on _QualityTier {
+extension QualityTierRank on QualityTier {
   int get rank => index; // unknown=0, q360=1 … q1440=5, q4k=6
+
+  String get label {
+    switch (this) {
+      case QualityTier.q4k:
+        return '4K';
+      case QualityTier.q1440:
+        return '2K';
+      case QualityTier.q1080:
+        return '1080p';
+      case QualityTier.q720:
+        return '720p';
+      case QualityTier.q480:
+        return '480p';
+      case QualityTier.q360:
+        return '360p';
+      case QualityTier.unknown:
+        return 'Auto';
+    }
+  }
 }
 
 extension on QualityPreference {
@@ -26,15 +45,15 @@ extension on QualityPreference {
       case QualityPreference.any:
         return -1;
       case QualityPreference.q360:
-        return _QualityTier.q360.rank;
+        return QualityTier.q360.rank;
       case QualityPreference.q480:
-        return _QualityTier.q480.rank;
+        return QualityTier.q480.rank;
       case QualityPreference.q720:
-        return _QualityTier.q720.rank;
+        return QualityTier.q720.rank;
       case QualityPreference.q1080:
-        return _QualityTier.q1080.rank;
+        return QualityTier.q1080.rank;
       case QualityPreference.q4k:
-        return _QualityTier.q4k.rank;
+        return QualityTier.q4k.rank;
     }
   }
 
@@ -117,22 +136,22 @@ final RegExp _lowWords = RegExp(r'\blow(?:est)?\b', caseSensitive: false);
 /// "low" and `HDRezka` as HD.
 ///
 /// A number beats a word, so `HD 1080p` is 1080p rather than 720p.
-_QualityTier _detectTier(String sourceLabel) {
+QualityTier detectQualityTier(String sourceLabel) {
   final s = sourceLabel
       .replaceAll(_sizeNoise, ' ')
       .replaceAll(_peerNoise, ' ');
 
   final height = _labelledHeight(s);
-  if (height != null) return _tierForHeight(height);
+  if (height != null) return tierForHeight(height);
 
-  if (_uhdWords.hasMatch(s)) return _QualityTier.q4k;
-  if (_qhdWords.hasMatch(s)) return _QualityTier.q1440;
-  if (_fhdWords.hasMatch(s)) return _QualityTier.q1080;
-  if (_lowHdWords.hasMatch(s)) return _QualityTier.q480;
-  if (_hdWords.hasMatch(s)) return _QualityTier.q720;
-  if (_sdWords.hasMatch(s)) return _QualityTier.q480;
-  if (_lowWords.hasMatch(s)) return _QualityTier.q360;
-  return _QualityTier.unknown;
+  if (_uhdWords.hasMatch(s)) return QualityTier.q4k;
+  if (_qhdWords.hasMatch(s)) return QualityTier.q1440;
+  if (_fhdWords.hasMatch(s)) return QualityTier.q1080;
+  if (_lowHdWords.hasMatch(s)) return QualityTier.q480;
+  if (_hdWords.hasMatch(s)) return QualityTier.q720;
+  if (_sdWords.hasMatch(s)) return QualityTier.q480;
+  if (_lowWords.hasMatch(s)) return QualityTier.q360;
+  return QualityTier.unknown;
 }
 
 /// The height [label] states outright, in the three ways it can state it.
@@ -146,13 +165,13 @@ int? _labelledHeight(String label) {
 
 /// Buckets an odd height into the nearest tier — `576i` is SD, `900p` is
 /// closer to 1080 than to 720.
-_QualityTier _tierForHeight(int height) {
-  if (height >= 1800) return _QualityTier.q4k;
-  if (height >= 1260) return _QualityTier.q1440;
-  if (height >= 900) return _QualityTier.q1080;
-  if (height >= 600) return _QualityTier.q720;
-  if (height >= 420) return _QualityTier.q480;
-  return _QualityTier.q360;
+QualityTier tierForHeight(int height) {
+  if (height >= 1800) return QualityTier.q4k;
+  if (height >= 1260) return QualityTier.q1440;
+  if (height >= 900) return QualityTier.q1080;
+  if (height >= 600) return QualityTier.q720;
+  if (height >= 420) return QualityTier.q480;
+  return QualityTier.q360;
 }
 
 /// Returns a sort key for [tier] given [prefRank].
@@ -160,8 +179,8 @@ _QualityTier _tierForHeight(int height) {
 /// - Lower tiers     → 1, 2, … (closer lower = smaller key)
 /// - Higher tiers    → rank (always > any lower-tier key)
 /// - Unknown/auto    → 100 (always last)
-int _sortKey(_QualityTier tier, int prefRank) {
-  if (tier == _QualityTier.unknown) return 100;
+int _sortKey(QualityTier tier, int prefRank) {
+  if (tier == QualityTier.unknown) return 100;
   final r = tier.rank;
   if (r == prefRank) return 0;
   if (r < prefRank) return prefRank - r; // 1 … prefRank
@@ -213,7 +232,7 @@ List<StreamResult> sortStreamsByQuality(
       .entries
       .map(
         (e) =>
-            (index: e.key, stream: e.value, tier: _detectTier(e.value.source)),
+            (index: e.key, stream: e.value, tier: detectQualityTier(e.value.source)),
       )
       .toList();
 
@@ -253,8 +272,8 @@ List<StreamResult> filterStreamsByQuality(
   final prefRank = preference.rank;
 
   final filtered = streams.where((s) {
-    final tier = _detectTier(s.source);
-    if (tier == _QualityTier.unknown) return true; // always keep auto/unknown
+    final tier = detectQualityTier(s.source);
+    if (tier == QualityTier.unknown) return true; // always keep auto/unknown
     final r = tier.rank;
     if (mode == QualityFilterMode.atOrAbove) return r >= prefRank;
     if (mode == QualityFilterMode.atOrBelow) return r <= prefRank;
@@ -273,20 +292,5 @@ List<StreamResult> filterStreamsByQuality(
 /// Returns a short human-readable quality label for [stream] suitable for
 /// display as a badge in the Sources tab (e.g. "1080p", "720p", "Auto").
 String qualityBadgeLabel(StreamResult stream) {
-  switch (_detectTier(stream.source)) {
-    case _QualityTier.q4k:
-      return '4K';
-    case _QualityTier.q1440:
-      return '2K';
-    case _QualityTier.q1080:
-      return '1080p';
-    case _QualityTier.q720:
-      return '720p';
-    case _QualityTier.q480:
-      return '480p';
-    case _QualityTier.q360:
-      return '360p';
-    case _QualityTier.unknown:
-      return 'Auto';
-  }
+  return detectQualityTier(stream.source).label;
 }

@@ -154,6 +154,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       ValueNotifier(const <SubtitleTrack>[]);
   final ValueNotifier<String?> _activeEmbeddedSubtitle = ValueNotifier(null);
 
+  /// The video tracks inside the media (e.g. HLS renditions), mirrored for manual quality choice.
+  final ValueNotifier<List<VideoTrack>> _videoTracks =
+      ValueNotifier(const <VideoTrack>[]);
+  final ValueNotifier<VideoTrack?> _currentVideoTrack =
+      ValueNotifier(null);
+
+  /// Manual quality override chosen by the viewer (e.g. '1080p', '720p', 'Auto')
+  String? _manualQualitySelection;
+
   /// Set while media is opened with the Subtitles setting at Off: mpv selects
   /// a subtitle for itself as the file opens, and one selected behind a viewer
   /// who asked for none is turned off again - see [_applySubtitleDefault].
@@ -649,6 +658,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         ];
         _embeddedSubtitles.value = list;
 
+        final vList = [
+          for (final track in tracks.video)
+            if (track.id != 'no' && track.id != 'auto') track,
+        ];
+        _videoTracks.value = vList;
+
         // Auto-select preferred embedded subtitle if none is active and user didn't disable
         if (!_viewerChoseSubtitle &&
             _sideCars.active == null &&
@@ -674,6 +689,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                 subtitle.id == 'auto'
             ? null
             : subtitle.id;
+        _currentVideoTrack.value = track.video;
         _applySubtitleDefault(subtitle.id);
       }),
     );
@@ -1566,13 +1582,30 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     );
   }
 
-  /// The badge the control bar shows for what is playing, so the quality
-  /// control reads `1080p` rather than an unlabelled layers icon.
+  /// The badge the control bar shows for what is playing.
   String get _currentQualityLabel {
+    if (_manualQualitySelection != null &&
+        _manualQualitySelection != 'Auto') {
+      return _manualQualitySelection!;
+    }
+    final activeVideo = _currentVideoTrack.value;
+    if (activeVideo != null &&
+        activeVideo.h != null &&
+        activeVideo.h! > 0) {
+      final h = activeVideo.h!;
+      if (h >= 1800) return '4K';
+      if (h >= 1260) return '2K';
+      if (h >= 900) return '1080p';
+      if (h >= 600) return '720p';
+      if (h >= 420) return '480p';
+      if (h >= 240) return '360p';
+    }
     final streams = _resolved?.streams ?? _candidates;
-    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return 'Sources';
-    final badge = qualityBadgeLabel(streams[_attemptIndex]);
-    return badge == 'Auto' ? 'Sources' : badge;
+    if (_attemptIndex >= 0 && _attemptIndex < streams.length) {
+      final badge = qualityBadgeLabel(streams[_attemptIndex]);
+      if (badge != 'Auto') return badge;
+    }
+    return 'Quality';
   }
 
   Future<void> _switchSource(int index) async {
@@ -1581,16 +1614,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     await _openCandidate(index, startAt: _position);
   }
 
-  /// The source picker, opened from the More sheet: one row per stream in the
-  /// order the resolver ranked them, the one playing ticked.
-  ///
-  /// The panel's row rather than a list tile, so a remote can reach every
-  /// source with the arrows and Select.
-  void _showSourcesDialog() {
+  void _showSourcesDialog() => _showQualityAndSourcesDialog();
+
+  /// Quality and Source picker: lets the user explicitly lock a desired quality
+  /// (Auto, 4K, 1080p, 720p, 480p, 360p) or switch specific HLS renditions,
+  /// and pick individual provider mirrors.
+  void _showQualityAndSourcesDialog() {
     _onUserActivity();
-    final l10n = AppLocalizations.of(context);
     final streams = _resolved?.streams ?? _candidates;
     final playingIndex = _attemptIndex;
+    final videoTracks = _videoTracks.value;
+    final activeTrack = _currentVideoTrack.value;
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1604,25 +1639,150 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           child: SafeArea(
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72,
+                maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.78,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   PlayerSheetHeader(
-                    title: l10n?.sources ?? 'Sources',
+                    title: 'Quality & Sources',
                     isTv: _isTv,
                   ),
                   Flexible(
                     child: ListView(
                       shrinkWrap: true,
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(bottom: 16),
                       children: [
-                        // The press is on the bar whatever the list holds, so
-                        // it always opens something - a sheet that says there
-                        // is nothing is an answer; a press that does nothing
-                        // reads as a bug.
+                        // SECTION 1: RESOLUTION / STREAM QUALITY
+                        const PanelSubheader(title: 'Quality & Resolution'),
+
+                        // 1. Auto (Adaptive)
+                        PanelRow(
+                          label: 'Auto (Adaptive)',
+                          detail: 'Automatically matches connection speed',
+                          badges: const <String>['Adaptive'],
+                          icon: Icons.auto_awesome_rounded,
+                          selected: _manualQualitySelection == null ||
+                              _manualQualitySelection == 'Auto',
+                          selectedLabel: 'Active',
+                          onTap: () {
+                            setState(() {
+                              _manualQualitySelection = 'Auto';
+                            });
+                            unawaited(_player.setVideoTrack(VideoTrack.auto()));
+                            Navigator.of(sheetContext).maybePop();
+                          },
+                        ),
+
+                        // 2. Direct HLS Renditions (if demuxed by mpv)
+                        if (videoTracks.length > 1) ...[
+                          for (final track in videoTracks)
+                            PanelRow(
+                              label: track.h != null
+                                  ? '${track.h}p ${track.h! >= 1080 ? 'Full HD' : (track.h! >= 720 ? 'HD' : 'SD')}'
+                                  : (track.title ?? 'Track ${track.id}'),
+                              detail: [
+                                if (track.w != null && track.h != null)
+                                  '${track.w}x${track.h}',
+                                if (track.bitrate != null && track.bitrate! > 0)
+                                  '${(track.bitrate! / 1000000).toStringAsFixed(1)} Mbps',
+                                if (track.fps != null && track.fps! > 0)
+                                  '${track.fps!.toStringAsFixed(0)} fps',
+                                if (track.codec != null) track.codec!,
+                              ].join(' • '),
+                              badges: <String>[
+                                if (track.h != null) '${track.h}p',
+                              ],
+                              selected: activeTrack?.id == track.id,
+                              selectedLabel: 'Selected',
+                              onTap: () {
+                                setState(() {
+                                  _manualQualitySelection =
+                                      track.h != null ? '${track.h}p' : track.id;
+                                });
+                                unawaited(_player.setVideoTrack(track));
+                                Navigator.of(sheetContext).maybePop();
+                              },
+                            ),
+                        ],
+
+                        // 3. Discrete Target Tiers (4K, 1080p, 720p, 480p, 360p)
+                        for (final targetTier in const [
+                          (QualityTier.q4k, '4K Ultra HD', '4K'),
+                          (QualityTier.q1080, '1080p Full HD', '1080p'),
+                          (QualityTier.q720, '720p High Definition', '720p'),
+                          (QualityTier.q480, '480p Standard Definition', '480p'),
+                          (QualityTier.q360, '360p Data Saver', '360p'),
+                        ]) ...[
+                          () {
+                            final tier = targetTier.$1;
+                            final title = targetTier.$2;
+                            final badge = targetTier.$3;
+
+                            final matchingTrack = videoTracks.firstWhereOrNull(
+                              (t) => t.h != null && tierForHeight(t.h!) == tier,
+                            );
+
+                            final matchingCandidates = streams
+                                .asMap()
+                                .entries
+                                .where(
+                                  (e) =>
+                                      detectQualityTier(e.value.source) == tier,
+                                )
+                                .toList();
+
+                            final isAvailable = matchingTrack != null ||
+                                matchingCandidates.isNotEmpty;
+                            final isCurrentlyActive =
+                                _currentQualityLabel == badge ||
+                                    (activeTrack != null &&
+                                        activeTrack.h != null &&
+                                        tierForHeight(activeTrack.h!) == tier);
+
+                            if (!isAvailable && videoTracks.isNotEmpty) {
+                              return const SizedBox.shrink();
+                            }
+
+                            return PanelRow(
+                              label: title,
+                              detail: isAvailable
+                                  ? (matchingTrack != null
+                                      ? 'Stream video track'
+                                      : '${matchingCandidates.length} server mirror${matchingCandidates.length > 1 ? 's' : ''}')
+                                  : 'No server reported this exact resolution',
+                              badges: <String>[badge],
+                              icon: Icons.high_quality_rounded,
+                              selected: isCurrentlyActive,
+                              selectedLabel: 'Active',
+                              enabled: isAvailable,
+                              onTap: () {
+                                setState(() {
+                                  _manualQualitySelection = badge;
+                                });
+                                Navigator.of(sheetContext).maybePop();
+
+                                if (matchingTrack != null) {
+                                  unawaited(_player.setVideoTrack(matchingTrack));
+                                } else if (matchingCandidates.isNotEmpty) {
+                                  final bestIndex =
+                                      matchingCandidates.first.key;
+                                  if (bestIndex != playingIndex) {
+                                    unawaited(_switchSource(bestIndex));
+                                  }
+                                }
+                              },
+                            );
+                          }(),
+                        ],
+
+                        // SECTION 2: PROVIDER SERVERS / SOURCES
+                        const SizedBox(height: 12),
+                        const PanelSubheader(
+                          title: 'Provider Servers & Mirrors',
+                        ),
+
                         if (streams.isEmpty)
                           const PanelEmpty(
                             text:
@@ -1632,6 +1792,17 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                           for (final (index, stream) in streams.indexed)
                             PanelRow(
                               label: stream.displaySource,
+                              detail: [
+                                if (stream.providerName.isNotEmpty &&
+                                    stream.providerName.toLowerCase() !=
+                                        'unknown')
+                                  stream.providerName,
+                                if (stream.url.contains('.m3u8'))
+                                  'HLS Adaptive'
+                                else if (stream.url.contains('.mp4') ||
+                                    stream.url.contains('.mkv'))
+                                  'Direct Container',
+                              ].join(' • '),
                               badges: <String>[qualityBadgeLabel(stream)],
                               selected: index == playingIndex,
                               selectedLabel: 'Now playing',
@@ -1733,6 +1904,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     } catch (_) {}
     try {
       _activeEmbeddedSubtitle.dispose();
+    } catch (_) {}
+    try {
+      _videoTracks.dispose();
+    } catch (_) {}
+    try {
+      _currentVideoTrack.dispose();
     } catch (_) {}
     try {
       _player.dispose();
@@ -2193,13 +2370,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             isTv: _isTv,
             onPressed: _cycleFit,
           ),
-          if (_candidates.isNotEmpty)
-            PlayerActionButton(
+          ListenableBuilder(
+            listenable: Listenable.merge([
+              _videoTracks,
+              _currentVideoTrack,
+            ]),
+            builder: (context, _) => PlayerActionButton(
               label: _currentQualityLabel,
               icon: Icons.high_quality_rounded,
               isTv: _isTv,
-              onTap: _showSourcesDialog,
+              onTap: _showQualityAndSourcesDialog,
             ),
+          ),
           PlayerIconButton(
             icon: Icons.audiotrack_rounded,
             tooltip: l10n?.audioTracks ?? 'Audio',
