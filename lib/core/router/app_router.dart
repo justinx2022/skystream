@@ -448,25 +448,11 @@ class PlayerRoute extends GoRouteData with $PlayerRoute {
 
   @override
   Widget build(BuildContext context, GoRouterState state) {
-    return Consumer(
-      builder: (context, ref, _) {
-        final useMediaKit = (Platform.isWindows || Platform.isAndroid) &&
-            (ref.watch(playerSettingsProvider).asData?.value.useMediaKitOnWindows ?? true);
-        if (useMediaKit) {
-          return MediaKitPlayerScreen(
-            item: $extra.item,
-            videoUrl: $extra.videoUrl,
-            episode: $extra.episode,
-            preloadedStreams: $extra.preloadedStreams,
-          );
-        }
-        return VlcPlayerScreen(
-          item: $extra.item,
-          videoUrl: $extra.videoUrl,
-          episode: $extra.episode,
-          preloadedStreams: $extra.preloadedStreams,
-        );
-      },
+    return MediaKitPlayerScreen(
+      item: $extra.item,
+      videoUrl: $extra.videoUrl,
+      episode: $extra.episode,
+      preloadedStreams: $extra.preloadedStreams,
     );
   }
 }

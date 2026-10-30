@@ -37,6 +37,7 @@ import '../subtitle_search_provider.dart' show subtitleLanguageProvider;
 import '../vlc/next_episode_countdown.dart';
 import '../vlc/panel/player_panel_metrics.dart';
 import '../vlc/panel/player_panel_row.dart';
+import '../vlc/panel/player_episodes_tab.dart';
 import '../vlc/panel/player_subtitle_search_page.dart';
 import '../vlc/player_startup_view.dart';
 import '../vlc/side_car_fetch.dart';
@@ -334,9 +335,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
-          // CRITICAL: Stop libmpv from deep probing on local loopback
-          await native.setProperty('demuxer-lavf-probesize', '500000');
-          await native.setProperty('demuxer-lavf-analyzeduration', '1000000');
+          await native.setProperty('cache-pause', 'no'); // Instant first frame
+          await native.setProperty('demuxer-hysteresis', '1'); // Instant seek recovery
+          // Fast container analysis for instant playback
+          await native.setProperty('demuxer-lavf-probesize', '200000');
+          await native.setProperty('demuxer-lavf-analyzeduration', '300000');
           await native.setProperty('network-timeout', '10');
           await native.setProperty('stream-lavf-o', 'timeout=10000000');
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
@@ -358,10 +361,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           // Direct Decoder Rendering into surface & Smart Frame Dropping
           await native.setProperty('vd-lavc-dr', 'yes');
           await native.setProperty('framedrop', 'vo');
-          await native.setProperty('video-sync', 'audio');
+          await native.setProperty('video-sync', 'display-resample');
 
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
+          await native.setProperty('cache-pause', 'no'); // Zero-latency start
+          await native.setProperty('demuxer-hysteresis', '1'); // Micro-seek latch
 
           // Fast container analysis for instant playback
           await native.setProperty('demuxer-lavf-probesize', '131072');    // 128KB fast probe
@@ -553,7 +558,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // whole screen for a number nobody can see is the most expensive thing
         // an idle video does.
         _position = pos;
-        _subtitlePlayback.tick();
+        _subtitlePlayback.tick(pos);
         _maybeRecordProgress(pos);
 
         // First movement of the clock is the source's successful start. The
@@ -638,10 +643,26 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         if (_disposed) return;
         // mpv's own choices - `no` and `auto` - are not tracks a viewer can
         // pick; the sheet offers Off itself.
-        _embeddedSubtitles.value = [
+        final list = [
           for (final track in tracks.subtitle)
             if (track.id != 'no' && track.id != 'auto') track,
         ];
+        _embeddedSubtitles.value = list;
+
+        // Auto-select preferred embedded subtitle if none is active and user didn't disable
+        if (!_viewerChoseSubtitle &&
+            _sideCars.active == null &&
+            !_subtitlesOffPending &&
+            list.isNotEmpty) {
+          final prefCode = _read(subtitleLanguageProvider);
+          final preferred = preferredSubtitleIndex(
+            [for (final t in list) t.language ?? t.title ?? ''],
+            prefCode,
+          );
+          if (preferred != null && preferred < list.length) {
+            unawaited(_player.setSubtitleTrack(list[preferred]));
+          }
+        }
       }),
     );
 
@@ -1449,11 +1470,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   }
 
   void _turnSubtitlesOff() {
+    _viewerChoseSubtitle = true;
+    _subtitlesOffPending = true;
     unawaited(_sideCars.select(null));
     unawaited(_player.setSubtitleTrack(SubtitleTrack.no()));
   }
 
   void _selectEmbeddedSubtitle(SubtitleTrack track) {
+    _viewerChoseSubtitle = true;
+    _subtitlesOffPending = false;
     unawaited(_sideCars.select(null));
     unawaited(_player.setSubtitleTrack(track));
   }
@@ -1488,7 +1513,18 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     Uri file, {
     String? label,
     String? language,
-  }) {
+  }) async {
+    _viewerChoseSubtitle = true;
+    _subtitlesOffPending = false;
+    try {
+      await _player.setSubtitleTrack(
+        SubtitleTrack.uri(
+          file.toString(),
+          title: label,
+          language: language,
+        ),
+      );
+    } catch (_) {}
     final track = _sideCars.addViewerTrack(
       file,
       label: label,
@@ -1776,13 +1812,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                 children: [
                   // Video Surface (Direct3D 11 / MediaCodec GPU)
                   Center(
-                    child: Video(
-                      controller: _videoController,
-                      fit: _fit,
-                      // media_kit's NoVideoControls is `const ... = null`
-                      // with no type, so it reads as dynamic and does not
-                      // assign to the builder type. Null is what it means.
-                      controls: null,
+                    child: RepaintBoundary(
+                      child: Video(
+                        controller: _videoController,
+                        fit: _fit,
+                        // media_kit's NoVideoControls is `const ... = null`
+                        // with no type, so it reads as dynamic and does not
+                        // assign to the builder type. Null is what it means.
+                        controls: null,
+                      ),
                     ),
                   ),
 
@@ -2136,6 +2174,32 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           ),
         ],
         actions: [
+          if ((_item.episodes ?? widget.item.episodes)?.isNotEmpty ?? false)
+            PlayerIconButton(
+              icon: Icons.video_library_rounded,
+              tooltip: l10n?.episodes ?? 'Episodes',
+              isTv: _isTv,
+              onPressed: _showEpisodesDialog,
+            ),
+          PlayerActionButton(
+            label: '${_playbackSpeed == 1.0 ? '1' : _playbackSpeed.toString()}x',
+            icon: Icons.speed_rounded,
+            isTv: _isTv,
+            onTap: _cyclePlaybackSpeed,
+          ),
+          PlayerIconButton(
+            icon: Icons.aspect_ratio_rounded,
+            tooltip: 'Fit: ${_fitLabel(_fit)}',
+            isTv: _isTv,
+            onPressed: _cycleFit,
+          ),
+          if (_candidates.isNotEmpty)
+            PlayerActionButton(
+              label: _currentQualityLabel,
+              icon: Icons.high_quality_rounded,
+              isTv: _isTv,
+              onTap: _showSourcesDialog,
+            ),
           PlayerIconButton(
             icon: Icons.audiotrack_rounded,
             tooltip: l10n?.audioTracks ?? 'Audio',
@@ -2157,6 +2221,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
               onPressed: _showSubtitleTrackDialog,
             ),
           ),
+          if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
+            PlayerIconButton(
+              icon: _isFullscreen
+                  ? Icons.fullscreen_exit_rounded
+                  : Icons.fullscreen_rounded,
+              tooltip: _isFullscreen ? 'Exit Fullscreen' : 'Fullscreen',
+              isTv: _isTv,
+              onPressed: _toggleFullscreen,
+            ),
           PlayerIconButton(
             icon: Icons.tune_rounded,
             tooltip: l10n?.options ?? 'Options',
@@ -2164,6 +2237,79 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             onPressed: _showMoreSheet,
           ),
         ],
+      ),
+    );
+  }
+
+  void _cyclePlaybackSpeed() {
+    _onUserActivity();
+    const speeds = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    int nextIdx = 0;
+    for (int i = 0; i < speeds.length; i++) {
+      if ((speeds[i] - _playbackSpeed).abs() < 0.05) {
+        nextIdx = (i + 1) % speeds.length;
+        break;
+      }
+    }
+    _setPlaybackSpeed(speeds[nextIdx]);
+  }
+
+  void _cycleFit() {
+    _onUserActivity();
+    final next = switch (_fit) {
+      BoxFit.contain => BoxFit.cover,
+      BoxFit.cover => BoxFit.fill,
+      _ => BoxFit.contain,
+    };
+    setState(() => _fit = next);
+  }
+
+  String _fitLabel(BoxFit fit) => switch (fit) {
+    BoxFit.cover => 'Zoom',
+    BoxFit.fill => 'Stretch',
+    _ => 'Fit',
+  };
+
+  Future<void> _showEpisodesDialog() async {
+    _onUserActivity();
+    final episodes = _item.episodes ?? widget.item.episodes ?? [];
+    if (episodes.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: HotstarPlayerStyle.panelElevated,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => PlayerPanelMetricsScope(
+        metrics: PlayerPanelMetrics.forTv(_isTv),
+        child: SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.75,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                PlayerSheetHeader(
+                  title: 'Episodes (${episodes.length})',
+                  isTv: _isTv,
+                ),
+                Flexible(
+                  child: PlayerEpisodesTab(
+                    episodes: episodes,
+                    currentEpisode: _effectiveCurrentEpisode,
+                    onPick: (ep) {
+                      Navigator.of(sheetContext).maybePop();
+                      unawaited(_startEpisode(ep));
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

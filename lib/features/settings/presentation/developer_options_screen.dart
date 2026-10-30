@@ -75,6 +75,12 @@ class _DeveloperOptionsScreenState
                       deviceAsync.asData?.value.isTv ?? false,
                     ),
                   ),
+                  SettingsTile(
+                    icon: Icons.movie_filter_rounded,
+                    title: 'Series Benchmark & Speed Lab',
+                    subtitle: 'Test multi-episode TV series, auto-advance, resume, and subtitles',
+                    onTap: () => _launchSeriesBenchmark(context),
+                  ),
                   if (kDebugMode)
                     SettingsTile(
                       icon: Icons.folder_copy_rounded,
@@ -220,6 +226,47 @@ class _DeveloperOptionsScreenState
           episodes: [Episode(name: title, url: url, posterUrl: '')],
         ),
         videoUrl: url,
+      ),
+    ).push<void>(context);
+  }
+
+  Future<void> _launchSeriesBenchmark(BuildContext context) async {
+    final ep1 = Episode(
+      name: 'Episode 1: Ultra-Fast Startup Test (Tears of Steel)',
+      url: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8',
+      posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
+      season: 1,
+      episode: 1,
+    );
+    final ep2 = Episode(
+      name: 'Episode 2: Multi-Subtitle Benchmark (Big Buck Bunny)',
+      url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+      posterUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500',
+      season: 1,
+      episode: 2,
+    );
+    final ep3 = Episode(
+      name: 'Episode 3: High Bitrate 4K Buffer Stress Test (Sintel)',
+      url: 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8',
+      posterUrl: 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=500',
+      season: 1,
+      episode: 3,
+    );
+
+    final item = MultimediaItem(
+      title: 'Series Benchmark & Verification Lab',
+      url: 'skystream://benchmark/series-lab',
+      posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500',
+      provider: 'SkyStream Benchmark Engine',
+      contentType: MultimediaContentType.series,
+      episodes: [ep1, ep2, ep3],
+    );
+
+    await PlayerRoute(
+      $extra: PlayerRouteExtra(
+        item: item,
+        videoUrl: ep1.url,
+        episode: ep1,
       ),
     ).push<void>(context);
   }

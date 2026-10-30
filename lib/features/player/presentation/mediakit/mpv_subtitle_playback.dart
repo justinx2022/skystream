@@ -16,6 +16,7 @@ class MpvSubtitlePlayback extends ChangeNotifier implements SubtitlePlayback {
   MpvSubtitlePlayback(this._player);
 
   final Player _player;
+  Duration _cachedPosition = Duration.zero;
 
   /// The delay on its own, for a reader that wants only the delay.
   ///
@@ -29,7 +30,8 @@ class MpvSubtitlePlayback extends ChangeNotifier implements SubtitlePlayback {
   );
 
   @override
-  Duration get position => _player.state.position;
+  Duration get position =>
+      _cachedPosition > Duration.zero ? _cachedPosition : _player.state.position;
 
   @override
   bool get isPlaying => _player.state.playing;
@@ -49,7 +51,14 @@ class MpvSubtitlePlayback extends ChangeNotifier implements SubtitlePlayback {
   }
 
   /// The engine's clock moved, or its playing state did.
-  void tick() => notifyListeners();
+  void tick([Duration? currentPosition]) {
+    if (currentPosition != null) {
+      _cachedPosition = currentPosition;
+    } else {
+      _cachedPosition = _player.state.position;
+    }
+    notifyListeners();
+  }
 
   @override
   void dispose() {
