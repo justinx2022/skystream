@@ -88,6 +88,18 @@ void main() {
     (watchHistoryProvider, const <HistoryItem>[]),
   ];
 
+  /// The auto-selected path: no list handed in, so the resolver ranks the
+  /// provider's candidates itself and speed-checks them. A list handed in is a
+  /// row the viewer pressed and never waits on its check.
+  ProviderReader pluginReader(List<StreamResult> streams) => readerOf([
+    (activeProviderProvider, FakePlugin(streams)),
+    (
+      playerSettingsProvider,
+      const AsyncValue<PlayerSettings>.data(PlayerSettings()),
+    ),
+    (watchHistoryProvider, const <HistoryItem>[]),
+  ]);
+
   group('resolvePlayback', () {
     // The bug this whole file exists for: PlayerRouteExtra.videoUrl is a plugin
     // resolution token, and plugins are free to make it a JSON array. Phase 5
@@ -259,6 +271,75 @@ void main() {
 
       expect(resolved.selected.url, 'https://cdn.example/720.mp4');
     });
+
+    // The check used to stand between the tap and the first frame: a tapped
+    // row opened only once its own probe answered, up to the whole probe
+    // budget. A tap is a choice, so it opens now and the check follows behind.
+    test('opens before its check has answered', () async {
+      final held = Completer<void>();
+      await http.runWithClient(() async {
+        final resolving = resolvePlayback(
+          read: readerWith(const PlayerSettings()),
+          item: itemWith(),
+          videoUrl: 'https://example.com/episode/1',
+          preloadedStreams: tapped720Beneath1080(),
+        );
+        var opened = false;
+        unawaited(resolving.then((_) => opened = true));
+        await pumpEventQueue();
+        expect(
+          opened,
+          isTrue,
+          reason: 'nothing was waiting on a link that has not answered',
+        );
+
+        held.complete();
+        await pumpEventQueue();
+        final resolved = await resolving;
+        expect(resolved.index, 0);
+        expect(resolved.selected.url, 'https://cdn.example/720.mp4');
+      }, () => MockClient((request) async {
+        await held.future;
+        return http.Response(
+          '',
+          206,
+          headers: {'content-range': 'bytes 0-0/9'},
+        );
+      }));
+    });
+
+    // The check carries on behind the open, so a dead mirror is found - and a
+    // working one proved - before failover needs to know.
+    test('the check keeps running behind the opened row', () async {
+      final outcomes = <int, ProbeOutcome>{};
+      final resolved = await http.runWithClient(
+        () => resolvePlayback(
+          read: readerWith(const PlayerSettings()),
+          item: itemWith(),
+          videoUrl: 'https://example.com/episode/1',
+          preloadedStreams: tapped720Beneath1080(),
+          onProbe: (index, outcome) {
+            if (outcome != ProbeOutcome.trying) outcomes[index] = outcome;
+          },
+        ),
+        () => MockClient((request) async {
+          if (request.url.path.endsWith('720.mp4')) {
+            if (request.method == 'HEAD') return http.Response('', 404);
+            throw http.ClientException('refused', request.url);
+          }
+          return http.Response(
+            '',
+            206,
+            headers: {'content-range': 'bytes 0-0/9'},
+          );
+        }),
+      );
+
+      await pumpEventQueue();
+      expect(resolved.index, 0, reason: 'the tapped row opened, dead or not');
+      expect(outcomes[0], ProbeOutcome.unhealthy);
+      expect(outcomes[1], ProbeOutcome.healthy);
+    });
   });
 
   // Ethernet-connected televisions and desktops are core targets, and asking
@@ -336,10 +417,9 @@ void main() {
       List<StreamResult>? candidates;
 
       final resolved = await resolvePlayback(
-        read: readerOf(defaults),
+        read: pluginReader(candidatesWithHealthyMiddle()),
         item: itemWith(),
         videoUrl: 'https://example.com/episode/1',
-        preloadedStreams: candidatesWithHealthyMiddle(),
         probeCandidates: 3,
         onCandidates: (streams) {
           candidates = streams;
@@ -394,10 +474,9 @@ void main() {
     test('a row picked during the check ends it on exactly that row', () async {
       final settled = <int>[];
       final resolved = await resolvePlayback(
-        read: readerOf(defaults),
+        read: pluginReader(candidatesWithHealthyMiddle()),
         item: itemWith(),
         videoUrl: 'https://example.com/episode/1',
-        preloadedStreams: candidatesWithHealthyMiddle(),
         probeCandidates: 3,
         onProbe: (index, outcome) {
           if (outcome != ProbeOutcome.trying) settled.add(index);
@@ -452,10 +531,9 @@ void main() {
       final dispatched = <int>[];
       await http.runWithClient(() async {
         final resolving = resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b'), at('c'), at('d')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b'), at('c'), at('d')],
           onProbe: (index, outcome) {
             if (outcome == ProbeOutcome.trying) dispatched.add(index);
           },
@@ -483,17 +561,16 @@ void main() {
       final dispatched = <int>[];
       final resolved = await http.runWithClient(
         () => resolvePlayback(
-          read: readerOf(defaults),
-          item: itemWith(),
-          videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [
+          read: pluginReader([
             at('a'),
             at('b'),
             at('c'),
             at('d'),
             at('e'),
             at('f'),
-          ],
+          ]),
+          item: itemWith(),
+          videoUrl: 'https://example.com/episode/1',
           onProbe: (index, outcome) {
             if (outcome == ProbeOutcome.trying) dispatched.add(index);
           },
@@ -510,10 +587,9 @@ void main() {
     test('when every candidate is dead, the preferred one opens anyway', () async {
       final resolved = await http.runWithClient(
         () => resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b'), at('c'), at('d')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b'), at('c'), at('d')],
         ),
         () => answering(dead: {'a', 'b', 'c', 'd'}),
       );
@@ -529,10 +605,9 @@ void main() {
       final dispatched = <int>[];
       await http.runWithClient(() async {
         final resolved = await resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b'), at('c'), at('d')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b'), at('c'), at('d')],
           onProbe: (index, outcome) {
             if (outcome == ProbeOutcome.trying) dispatched.add(index);
           },
@@ -556,10 +631,9 @@ void main() {
       final dispatched = <int>[];
       await http.runWithClient(() async {
         await resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b'), at('c'), at('d')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b'), at('c'), at('d')],
           onProbe: (index, outcome) {
             if (outcome == ProbeOutcome.trying) dispatched.add(index);
           },
@@ -578,10 +652,9 @@ void main() {
       final outcomes = <int, ProbeOutcome>{};
       final resolved = await http.runWithClient(
         () => resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b')],
           onProbe: (index, outcome) => outcomes[index] = outcome,
         ),
         () => MockClient((request) async {
@@ -609,10 +682,9 @@ void main() {
       final slow = Completer<void>();
       final resolved = await http.runWithClient(
         () => resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b')],
           probeBudget: const Duration(milliseconds: 50),
         ),
         () => answering(held: {'a': slow}),
@@ -629,10 +701,9 @@ void main() {
       final slow = Completer<void>();
       final resolved = await http.runWithClient(
         () => resolvePlayback(
-          read: readerOf(defaults),
+          read: pluginReader([at('a'), at('b')]),
           item: itemWith(),
           videoUrl: 'https://example.com/episode/1',
-          preloadedStreams: [at('a'), at('b')],
           probeBudget: const Duration(milliseconds: 50),
         ),
         () => answering(held: {'a': slow, 'b': slow}),

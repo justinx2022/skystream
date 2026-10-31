@@ -267,11 +267,13 @@ class _ProbeAnswer {
 /// [probeCandidates] is how many mirrors are speed-checked at once, in
 /// priority order, with a dead one's place going to the next in line. The
 /// quickest of the preferred quality tier wins, so a title whose first mirror
-/// is slow starts on a fast one instead of waiting it out. That applies to a
-/// hand-picked list too: a tapped source answering when asked is opened as
-/// tapped, and only a tapped source that leaves the screen waiting gives its
-/// place to a quicker mirror of the same quality. Pass 0 to skip probing.
-/// [probeBudget] caps how long the check may hold up playback.
+/// is slow starts on a fast one instead of waiting it out. Pass 0 to skip
+/// probing.
+///
+/// A list handed in is a row the viewer pressed, so it never waits: its head
+/// opens at once and the check runs behind it, its verdicts steering failover
+/// rather than the first open. [probeBudget] caps how long the check may hold
+/// up an auto-selected playback.
 ///
 /// [onCandidates] fires as soon as the ordered list exists; indices in every
 /// later report and in [ResolvedPlayback] are indices into that list.
@@ -439,9 +441,8 @@ Future<ResolvedPlayback> resolvePlayback({
       : await _firstHealthyStream(
           streams,
           startIndex: saved,
-          // A tapped row is a choice, not a candidate: a mirror answering
-          // first may still replace a row that has not answered, but once the
-          // tapped row answers it is the one that opens.
+          // A tapped row is a choice, not a candidate: it opens at once, and
+          // the check behind it only steers failover.
           pinned: handPicked ? 0 : -1,
           limit: probeCandidates,
           budget: probeBudget,
@@ -614,9 +615,10 @@ const Duration kSpeedProbeBudget = Duration(milliseconds: 1200);
 /// in line, so the source list shows every slot filled rather than a dead one
 /// left where it fell. Completing the caller's `abandon` stops it.
 ///
-/// [pinned] is a candidate the viewer picked. It never loses the race once it
-/// answers: a mirror that answered sooner while the picked row was still
-/// silent may still take its place, but one that answers after it cannot.
+/// [pinned] is a candidate the viewer picked. It opens at once, before any
+/// probe answers: nothing is allowed between the tap and the first frame. The
+/// check still runs behind it - the rest of the list is dispatched and
+/// reported as usual - so its verdicts steer failover, never this open.
 ///
 /// Falls back to [startIndex] if every candidate fails, so a wrong probe never
 /// blocks playback outright, and to the quickest found so far once [budget]
@@ -746,13 +748,6 @@ Future<int> _firstHealthyStream(
 
   void decide() {
     if (completer.isCompleted) return;
-    // A picked row that answered is the answer. The check may still be
-    // waiting at mirrors below it, but a quicker one would only be opening
-    // something the viewer did not press.
-    if (pin >= 0 && (results[pin]?.outcome.reached ?? false)) {
-      finish(pin);
-      return;
-    }
     // Instant-Start Optimization: If the top preferred candidate answered and is healthy,
     // open it immediately! Never delay the #1 ranked source for 1.2s to wait on lower-ranked mirrors.
     if (results[start]?.outcome.reached ?? false) {
@@ -833,6 +828,12 @@ Future<int> _firstHealthyStream(
   for (var i = 0; i < limit; i++) {
     dispatchNext();
   }
+
+  // A row the viewer pressed opens now: nothing may stand between the tap and
+  // the first frame, so its own probe is advice, never a gate. The check still
+  // runs behind it - the rest of the list is dispatched and reported as it
+  // answers - so a dead mirror is found for failover without delaying this one.
+  if (pin >= 0) finish(pin);
 
   final winner = await completer.future;
   if (isCancelled?.call() ?? false) return start;

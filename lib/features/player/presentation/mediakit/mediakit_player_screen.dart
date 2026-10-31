@@ -969,9 +969,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             ? (widget.preloadedStreams ??
                 StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams)
             : StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams,
-        // The first few mirrors are speed-raced, including a tapped one: an
-        // answer opens as picked, and only a source that leaves the screen
-        // waiting gives its place to a quicker mirror of the same quality.
+        // A tapped row opens at once - its check runs behind the open and only
+        // steers failover. An auto-picked list is speed-raced instead, so a
+        // slow first mirror does not hold the screen.
         //
         // That check is a handful of range requests nobody asked for, so it is
         // skipped on a metered link: the preferred source opens as it stands,
