@@ -105,6 +105,10 @@ class DahlService {
   }) async {
     final settings = _getSettings();
     if (!settings.selfHealingScrapers) return null;
+    // The caller sometimes passes an exception message. There is nothing to
+    // extract from that, so the model would only invent a link. Require real
+    // markup before spending a request.
+    if (!rawSnippet.contains('<')) return null;
 
     final prompt =
         'Extract the direct playable video link (HLS .m3u8, MP4, or worker direct link) '
@@ -113,11 +117,14 @@ class DahlService {
         'Reply ONLY with the absolute raw URL or NONE.';
 
     final out = await complete(prompt: prompt, maxTokens: 200);
-    if (out != null &&
-        (out.startsWith('http://') || out.startsWith('https://'))) {
-      return out.trim();
-    }
-    return null;
+    if (out == null) return null;
+    final candidate = out.trim();
+    final parsed = Uri.tryParse(candidate);
+    final valid = parsed != null &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+        parsed.host.isNotEmpty &&
+        !candidate.contains(RegExp(r'\s'));
+    return valid ? candidate : null;
   }
 
   /// Evaluates 403 Forbidden errors and determines required bypass headers (Referer, Host, Origin).

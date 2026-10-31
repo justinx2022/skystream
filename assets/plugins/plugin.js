@@ -143,10 +143,10 @@
             BASE_URL: "https://vaplayer.ru",
             IFRAME_URL: "https://brightpathsignals.com",
             API_URL: "https://streamdata.vaplayer.ru/api.php",
+            // The API accepts a brightpathsignals Referer/Origin, but the video CDN
+            // answers 403 to every segment that carries them, so none are sent.
             HEADERS: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://brightpathsignals.com/",
-                "Origin": "https://brightpathsignals.com",
                 "Accept": "*/*"
             },
             buildUrl: (media) => {

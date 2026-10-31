@@ -126,6 +126,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// a proxied open that never draws gets the direct URL, and vice versa.
   bool _attemptTriedDirect = false;
 
+  /// "Failed to recognize file format" errors for the current attempt. mpv
+  /// emits one per segment after it falls back to reading an unopenable
+  /// playlist as plain text; three before a picture means the source is dead.
+  int _unrecognizedFormatErrors = 0;
+
   /// The leash the current attempt was given, kept so the record made when it
   /// runs out can say how long the wait was.
   Duration _attemptWatchdogWait = _kSilentOpenWatchdog;
@@ -379,9 +384,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           ); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-pause-wait', '0.5');
+          await native.setProperty('cache-pause-wait', '2');
           await native.setProperty('demuxer-lavf-probesize', '1048576');
-          await native.setProperty('demuxer-lavf-analyzeduration', '500000');
+          // Seconds: 500000 is rejected as out of range, not read as 0.5 s.
+          await native.setProperty('demuxer-lavf-analyzeduration', '0.5');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
@@ -412,9 +418,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-pause-wait', '0.5');
+          await native.setProperty('cache-pause-wait', '2');
           await native.setProperty('demuxer-lavf-probesize', '1048576');
-          await native.setProperty('demuxer-lavf-analyzeduration', '500000');
+          // Seconds: 500000 is rejected as out of range, not read as 0.5 s.
+          await native.setProperty('demuxer-lavf-analyzeduration', '0.5');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
@@ -780,12 +787,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             !_isLoading &&
             !_isSwitching) {
           _midstreamStallWatchdog?.cancel();
-          _midstreamStallWatchdog = Timer(const Duration(milliseconds: 4500), () {
+          _midstreamStallWatchdog = Timer(const Duration(milliseconds: 12000), () {
             if (_disposed || !mounted) return;
             if (_isBuffering && _player.state.playing) {
               if (kDebugMode) {
                 debugPrint(
-                  '[MediaKit] Mid-stream socket stall (>4500ms). Hot-swapping to shadow mirror at $_position...',
+                  '[MediaKit] Mid-stream socket stall (>12000ms). Hot-swapping to shadow mirror at $_position...',
                 );
               }
               _recordProviderHealth(success: false, reason: 'mid-stream stall');
@@ -834,6 +841,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // change. Failing over on that is what made track switching reload
         // the whole link.
         if (_isSettlingTrackChange) return;
+        // mpv falls back to reading an HLS playlist as plain text when the
+        // stream cannot be opened, then tries every segment as its own file
+        // and reports this error for each. Three in a row before any picture
+        // means the source is dead: move on instead of waiting out the timer.
+        if (!_attemptReachedPicture &&
+            err.contains('Failed to recognize file format')) {
+          _unrecognizedFormatErrors++;
+          if (_unrecognizedFormatErrors >= 3) {
+            _unrecognizedFormatErrors = 0;
+            _trace?.warn('bad-format', 'attempt=$_attemptIndex');
+            _recordProviderHealth(
+              success: false,
+              reason: 'stream not recognised',
+            );
+            _failoverNext();
+            return;
+          }
+        }
         _scheduleErrorRecovery();
       }),
     );
@@ -1225,6 +1250,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _attemptReachedPicture = false;
     _attemptTriedProxy = false;
     _attemptTriedDirect = false;
+    _unrecognizedFormatErrors = 0;
     _attemptProviderId = providerIdForStream(
       stream,
       fallback: _item.provider ?? '',

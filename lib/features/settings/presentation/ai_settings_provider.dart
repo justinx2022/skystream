@@ -5,7 +5,7 @@ import '../../../core/storage/settings_repository.dart';
 /// Configuration and toggles for SkyStream's in-app AI Neural Engine (Dahl).
 class AiSettings {
   const AiSettings({
-    this.aiEnabled = true,
+    this.aiEnabled = false,
     this.dahlApiKey = '',
     this.dahlModel = 'MiniMaxAI/MiniMax-M2.7',
     // 1. Playback & Network Acceleration
@@ -15,10 +15,10 @@ class AiSettings {
     this.seekKeyframePreCache = true,
     // 2. Video & Shaders
     this.neuralSuperResolution = false,
-    this.hdrToneMapping = true,
-    this.antiBanding = true,
+    this.hdrToneMapping = false,
+    this.antiBanding = false,
     // 3. Audio Intelligence
-    this.dialogueIsolation = true,
+    this.dialogueIsolation = false,
     this.nightModeAudio = false,
     this.multiAudioSync = true,
     // 4. Subtitles & X-Ray
@@ -26,8 +26,8 @@ class AiSettings {
     this.loreHud = false,
     this.realtimeTranslation = false,
     // 5. Self-Healing & Scrapers
-    this.selfHealingScrapers = true,
-    this.autoFixForbiddenHeaders = true,
+    this.selfHealingScrapers = false,
+    this.autoFixForbiddenHeaders = false,
     this.ghostLinkResurrection = true,
   });
 
@@ -128,7 +128,7 @@ class AiSettings {
       };
 
   factory AiSettings.fromMap(Map<String, dynamic> map) => AiSettings(
-        aiEnabled: map['aiEnabled'] as bool? ?? true,
+        aiEnabled: map['aiEnabled'] as bool? ?? false,
         dahlApiKey: map['dahlApiKey'] as String? ?? '',
         dahlModel: map['dahlModel'] as String? ?? 'MiniMaxAI/MiniMax-M2.7',
         intentPreFetch: map['intentPreFetch'] as bool? ?? true,
@@ -136,16 +136,16 @@ class AiSettings {
         dynamicDemuxerTuning: map['dynamicDemuxerTuning'] as bool? ?? true,
         seekKeyframePreCache: map['seekKeyframePreCache'] as bool? ?? true,
         neuralSuperResolution: map['neuralSuperResolution'] as bool? ?? false,
-        hdrToneMapping: map['hdrToneMapping'] as bool? ?? true,
-        antiBanding: map['antiBanding'] as bool? ?? true,
-        dialogueIsolation: map['dialogueIsolation'] as bool? ?? true,
+        hdrToneMapping: map['hdrToneMapping'] as bool? ?? false,
+        antiBanding: map['antiBanding'] as bool? ?? false,
+        dialogueIsolation: map['dialogueIsolation'] as bool? ?? false,
         nightModeAudio: map['nightModeAudio'] as bool? ?? false,
         multiAudioSync: map['multiAudioSync'] as bool? ?? true,
         acousticSubSync: map['acousticSubSync'] as bool? ?? true,
         loreHud: map['loreHud'] as bool? ?? false,
         realtimeTranslation: map['realtimeTranslation'] as bool? ?? false,
-        selfHealingScrapers: map['selfHealingScrapers'] as bool? ?? true,
-        autoFixForbiddenHeaders: map['autoFixForbiddenHeaders'] as bool? ?? true,
+        selfHealingScrapers: map['selfHealingScrapers'] as bool? ?? false,
+        autoFixForbiddenHeaders: map['autoFixForbiddenHeaders'] as bool? ?? false,
         ghostLinkResurrection: map['ghostLinkResurrection'] as bool? ?? true,
       );
 }

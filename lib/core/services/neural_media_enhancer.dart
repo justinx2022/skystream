@@ -63,8 +63,8 @@ class NeuralMediaEnhancer {
     if (!settings.aiEnabled || !settings.dynamicDemuxerTuning) return const {};
     return const {
       'demuxer-lavf-probesize': '1048576', // 1MB probe buffer (instant startup, avoids out of range without 4MB delay)
-      'demuxer-lavf-analyzeduration':
-          '500000', // 0.5s container analysis (fast time-to-first-frame)
+      // Seconds: mpv rejects 500000 as out of range (it is not microseconds).
+      'demuxer-lavf-analyzeduration': '0.5',
       'hr-seek': 'yes',
       'hr-seek-framedrop':
           'yes', // Drop intermediate frames for instantaneous scrubbing
