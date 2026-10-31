@@ -26,7 +26,7 @@ class DohSettings {
   final String customUrl;
 
   const DohSettings({
-    this.enabled = false,
+    this.enabled = true,
     this.provider = DohProvider.cloudflare,
     this.customUrl = '',
   });
@@ -54,7 +54,7 @@ class DohSettingsNotifier extends _$DohSettingsNotifier {
   Future<DohSettings> build() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final enabled = prefs.getBool(_kEnabledKey) ?? false;
+      final enabled = prefs.getBool(_kEnabledKey) ?? true;
       final providerName = prefs.getString(_kProviderKey);
       final customUrl = prefs.getString(_kCustomUrlKey) ?? '';
       final provider = DohProvider.values.firstWhere(
@@ -195,7 +195,7 @@ class DohService {
   );
 
   bool _initialized = false;
-  bool _enabled = false;
+  bool _enabled = true;
   DohProvider _provider = DohProvider.cloudflare;
   String _customUrl = '';
 
@@ -215,7 +215,7 @@ class DohService {
     if (_initialized) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      _enabled = prefs.getBool(DohSettingsNotifier._kEnabledKey) ?? false;
+      _enabled = prefs.getBool(DohSettingsNotifier._kEnabledKey) ?? true;
       final providerName = prefs.getString(DohSettingsNotifier._kProviderKey);
       _customUrl = prefs.getString(DohSettingsNotifier._kCustomUrlKey) ?? '';
       _provider = DohProvider.values.firstWhere(
