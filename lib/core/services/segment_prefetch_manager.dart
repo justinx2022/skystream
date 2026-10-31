@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import '../network/doh_resolver.dart';
 import '../network/http_defaults.dart';
 import 'local_proxy_service.dart';
 
@@ -162,7 +163,11 @@ class SegmentPrefetchManager {
     _inFlight[normKey] = completer;
 
     try {
-      final req = await client.getUrl(Uri.parse(url));
+      final req = await DohResolver.instance.openUrl(
+        client: client,
+        method: 'GET',
+        uri: Uri.parse(url),
+      );
 
       // 1. Apply sticky headers (e.g. referer, auth)
       session.stickyHeaders.forEach((name, value) {

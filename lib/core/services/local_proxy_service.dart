@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../media/cenc.dart';
 import '../media/dash_manifest.dart';
+import '../network/doh_resolver.dart';
 import '../network/http_defaults.dart';
 import 'segment_prefetch_manager.dart';
 
@@ -115,6 +116,12 @@ class LocalProxyService {
       ..idleTimeout = _upstreamIdleTimeout
       ..maxConnectionsPerHost = 12
       ..autoUncompress = autoUncompress;
+    client.badCertificateCallback = (cert, host, port) {
+      if (DohResolver.instance.isKnownIp(host)) {
+        return true;
+      }
+      return false;
+    };
     if (autoUncompress) {
       _uncompressingClient = client;
     } else {
@@ -441,7 +448,11 @@ class LocalProxyService {
     String url,
     Map<String, String> headers,
   ) async {
-    final req = await client.getUrl(Uri.parse(url));
+    final req = await DohResolver.instance.openUrl(
+      client: client,
+      method: 'GET',
+      uri: Uri.parse(url),
+    );
     headers.forEach(req.headers.set);
     if (req.headers.value(HttpHeaders.userAgentHeader) == null) {
       req.headers.set(HttpHeaders.userAgentHeader, kDefaultBrowserUserAgent);
@@ -632,7 +643,11 @@ class LocalProxyService {
     final client = _clientFor(autoUncompress: isRequestM3u8);
 
     try {
-      final req = await client.getUrl(Uri.parse(targetUrl));
+      final req = await DohResolver.instance.openUrl(
+        client: client,
+        method: 'GET',
+        uri: Uri.parse(targetUrl),
+      );
 
       // 1. Process incoming request headers first (Player headers)
       final Map<String, String> mergedCookies = {};
@@ -963,7 +978,11 @@ class LocalProxyService {
         final nextUrl = Uri.parse(currentUrl).resolve(location).toString();
         redirectCount++;
 
-        final nextReq = await client.getUrl(Uri.parse(nextUrl));
+        final nextReq = await DohResolver.instance.openUrl(
+          client: client,
+          method: 'GET',
+          uri: Uri.parse(nextUrl),
+        );
         nextReq.followRedirects = false;
 
         // PRESERVE CRITICAL HEADERS
@@ -1051,52 +1070,89 @@ class LocalProxyService {
     final baseUrl = Uri.parse(originalUrl);
     final List<String> segments = [];
 
-    final rewritten = content
-        .split('\n')
-        .map((line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty) return line;
+    final rawLines = content.split('\n');
+    final outputLines = <String>[];
+    bool skippingAdSegment = false;
 
-          if (trimmed.startsWith("#")) {
-            if (trimmed.contains('URI="')) {
-              return trimmed.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (
-                match,
-              ) {
-                final uri = match.group(1)!;
-                final r = _rewriteUrl(uri, baseUrl, stickyHeaders, options);
-                // debugPrint("[PROXY] Rewrote Tag URI: $uri");
-                return 'URI="$r"';
-              });
+    for (int i = 0; i < rawLines.length; i++) {
+      final line = rawLines[i];
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        outputLines.add(line);
+        continue;
+      }
+
+      if (trimmed.startsWith("#")) {
+        // Strip intrusive ad cue tags and discontinuity blocks that crash mpv
+        if (trimmed.startsWith('#EXT-X-CUE-') ||
+            trimmed.startsWith('#EXT-OATCLS-') ||
+            trimmed.startsWith('#EXT-X-SPLICEPOINT') ||
+            trimmed.startsWith('#EXT-X-DATERANGE:ID="ad-')) {
+          continue;
+        }
+
+        // If the tag is #EXTINF and the next line is a known ad URL, skip both
+        if (trimmed.startsWith('#EXTINF')) {
+          if (i + 1 < rawLines.length) {
+            final nextLower = rawLines[i + 1].trim().toLowerCase();
+            if (_isKnownAdUrl(nextLower)) {
+              skippingAdSegment = true;
+              continue;
             }
-            return line;
           }
+        }
 
-          // Check if this line is a sub-playlist (.m3u8 / .m3u) or an actual media segment
-          final lower = trimmed.toLowerCase();
-          final isChildPlaylist = lower.contains('.m3u8') ||
-              lower.contains('.m3u') ||
-              lower.contains('playlist.php') ||
-              lower.contains('play.php');
+        if (trimmed.contains('URI="')) {
+          final rew = trimmed.replaceAllMapped(RegExp(r'URI="([^"]+)"'), (
+            match,
+          ) {
+            final uri = match.group(1)!;
+            final r = _rewriteUrl(uri, baseUrl, stickyHeaders, options);
+            return 'URI="$r"';
+          });
+          outputLines.add(rew);
+          continue;
+        }
 
-          if (!isChildPlaylist) {
-            // Segment URL: collect resolved target URL for parallel prefetcher
-            try {
-              final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
-              segments.add(target);
-            } catch (_) {}
-          }
+        outputLines.add(line);
+        continue;
+      }
 
-          final r = _rewriteUrl(
-            trimmed,
-            baseUrl,
-            stickyHeaders,
-            options,
-            isSegment: !isChildPlaylist,
-          );
-          // debugPrint("[PROXY] Rewrote: $trimmed (isSegment: ${!isChildPlaylist})");
-          return r;
-        })
-        .join('\n');
+      if (skippingAdSegment) {
+        skippingAdSegment = false;
+        continue;
+      }
+
+      if (_isKnownAdUrl(trimmed.toLowerCase())) {
+        continue;
+      }
+
+      // Check if this line is a sub-playlist (.m3u8 / .m3u) or an actual media segment
+      final lower = trimmed.toLowerCase();
+      final isChildPlaylist = lower.contains('.m3u8') ||
+          lower.contains('.m3u') ||
+          lower.contains('playlist.php') ||
+          lower.contains('play.php');
+
+      if (!isChildPlaylist) {
+        // Segment URL: collect resolved target URL for parallel prefetcher
+        try {
+          final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
+          segments.add(target);
+        } catch (_) {}
+      }
+
+      final r = _rewriteUrl(
+        trimmed,
+        baseUrl,
+        stickyHeaders,
+        options,
+        isSegment: !isChildPlaylist,
+      );
+      outputLines.add(r);
+    }
+
+    final rewritten = outputLines.join('\n');
 
     if (segments.isNotEmpty) {
       final isVod = content.contains('#EXT-X-ENDLIST') ||
@@ -1113,6 +1169,17 @@ class LocalProxyService {
     clientRequest.response.add(utf8.encode(rewritten));
     await clientRequest.response.close();
     // debugPrint("[PROXY] M3U8 Rewrite Complete for: $originalUrl");
+  }
+
+  static bool _isKnownAdUrl(String lower) {
+    return lower.contains('doubleclick.net') ||
+        lower.contains('adnxs.com') ||
+        lower.contains('popads.net') ||
+        lower.contains('propellerads.com') ||
+        lower.contains('adsterra.com') ||
+        lower.contains('vidoomy.com') ||
+        lower.contains('/ad/segment') ||
+        lower.contains('/ads/segment');
   }
 
   bool _isValidM3u8(List<int> bytes) {

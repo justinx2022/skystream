@@ -179,12 +179,30 @@ class ProviderHealthService {
 
   /// Whether a provider is currently considered healthy enough for primary selection.
   bool isHealthy(String providerId) {
+    if (isQuarantined(providerId)) return false;
     return getHealthScore(providerId) >= 0.4;
+  }
+
+  /// Whether a provider is currently hard-quarantined due to repeated failures.
+  ///
+  /// After 3 consecutive failures, the provider is quarantined for 30 minutes,
+  /// preventing dead mirrors from holding up speed checks or playback.
+  bool isQuarantined(String providerId) {
+    if (providerId.isEmpty) return false;
+    final record = _records[providerId];
+    if (record == null) return false;
+    if (record.consecutiveFailures >= 3) {
+      final diff = DateTime.now().difference(record.lastAttemptAt);
+      if (diff < const Duration(minutes: 30)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Sorts candidate stream sources so healthy and fast providers come first.
   ///
-  /// Preserves relative order if health scores are within a close margin.
+  /// Quarantined providers are relegated to the bottom of the candidate pool.
   List<T> rankSourcesByHealth<T>({
     required List<T> sources,
     required String Function(T) getProviderId,
@@ -193,11 +211,16 @@ class ProviderHealthService {
 
     final scored = sources.map((source) {
       final pid = getProviderId(source);
-      return (source: source, score: getHealthScore(pid));
+      final quarantined = isQuarantined(pid);
+      final score = quarantined ? 0.05 : getHealthScore(pid);
+      return (source: source, score: score, quarantined: quarantined);
     }).toList();
 
-    // Sort descending by score. If scores are within 0.15, preserve original order.
+    // Sort descending by score, placing quarantined providers strictly last.
     scored.sort((a, b) {
+      if (a.quarantined != b.quarantined) {
+        return a.quarantined ? 1 : -1;
+      }
       if ((a.score - b.score).abs() > 0.15) {
         return b.score.compareTo(a.score);
       }

@@ -108,6 +108,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   Timer? _trackSwitchWatchdog;
   DateTime? _trackSettlingUntil;
   Timer? _startupWatchdog;
+  Timer? _midstreamStallWatchdog;
   DateTime? _attemptOpenedAt;
   Duration _attemptStartAt = Duration.zero;
   bool _attemptReachedPicture = false;
@@ -533,6 +534,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
     _startupWatchdog?.cancel();
+    _midstreamStallWatchdog?.cancel();
     _startupWatchdog = null;
     _attemptOpenedAt = null;
     _attemptReachedPicture = false;
@@ -730,6 +732,24 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // makes a normal track change look like a stall.
         if (isBuffering && _isSettlingTrackChange) return;
         setState(() => _isBuffering = isBuffering);
+
+        if (isBuffering && _hasPlayedOnce && !_isLoading && !_isSwitching) {
+          _midstreamStallWatchdog?.cancel();
+          _midstreamStallWatchdog = Timer(const Duration(milliseconds: 4500), () {
+            if (_disposed || !mounted) return;
+            if (_isBuffering && _player.state.playing) {
+              if (kDebugMode) {
+                debugPrint(
+                  '[MediaKit] Mid-stream socket stall (>4500ms). Hot-swapping to shadow mirror at $_position...',
+                );
+              }
+              _recordProviderHealth(success: false, reason: 'mid-stream stall');
+              _failoverNext();
+            }
+          });
+        } else {
+          _midstreamStallWatchdog?.cancel();
+        }
       }),
     );
 
@@ -1090,7 +1110,29 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _loadSourceSubtitles(stream, headers, at ?? Duration.zero);
 
     try {
-      if (_player.platform is NativePlayer) {
+      final bool isAlreadyProxied =
+          url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:');
+      final bool shouldRouteThroughShield = !isAlreadyProxied &&
+          (headers.isNotEmpty ||
+              url.toLowerCase().contains('.m3u8') ||
+              url.toLowerCase().contains('.mpd'));
+
+      String playUrl = url;
+      Map<String, String>? playHeaders = headers;
+
+      if (shouldRouteThroughShield) {
+        await LocalProxyService.instance.startServer();
+        playUrl = LocalProxyService.instance.getProxyUrl(
+          url,
+          headers: headers,
+        );
+        playHeaders = const {'X-Local-Proxy': '1'};
+        if (_player.platform is NativePlayer) {
+          final native = _player.platform as NativePlayer;
+          await native.setProperty('referer', '');
+          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
+        }
+      } else if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
         await native.setProperty('referer', referer ?? '');
@@ -1104,7 +1146,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         await native.setProperty('http-header-fields', extraFields.join(','));
       }
 
-      await _player.open(Media(url, httpHeaders: headers, start: at), play: true);
+      await _player.open(Media(playUrl, httpHeaders: playHeaders, start: at), play: true);
       if (_disposed || !mounted || token != _openToken) return;
       _armStartupWatchdog(token);
       setState(() {
@@ -1902,6 +1944,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _errorRecoveryTimer?.cancel();
     _trackSwitchWatchdog?.cancel();
     _startupWatchdog?.cancel();
+    _midstreamStallWatchdog?.cancel();
     for (final s in _subscriptions) {
       try {
         s.cancel();
