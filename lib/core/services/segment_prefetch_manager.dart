@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../network/doh_resolver.dart';
 import '../network/http_defaults.dart';
+import '../network/probe_answer.dart';
 import 'local_proxy_service.dart';
 
 /// In-memory cached media segment prefetched from upstream CDN.
@@ -289,7 +290,8 @@ class SegmentPrefetchManager {
         if (segmentLike &&
             contentTypeKey != null &&
             (contentType.contains('text/html') ||
-                contentType.contains('text/plain'))) {
+                contentType.contains('text/plain')) &&
+            !isWebPage(contentType, bytes.take(kProbeSniffBytes).toList())) {
           headers[contentTypeKey] = 'video/mp2t';
           headers.removeWhere(
             (String key, _) => key.toLowerCase() == 'x-content-type-options',
@@ -306,7 +308,8 @@ class SegmentPrefetchManager {
         completer.complete(cached);
         if (kDebugMode) {
           debugPrint(
-            '[PREFETCH-BOOSTER] Prefetched segment (${bytes.length} B, HTTP ${res.statusCode}): $url',
+            '[PREFETCH-BOOSTER] Prefetched segment (${bytes.length} B, '
+            'HTTP ${res.statusCode}): ${_safeLabel(url)}',
           );
         }
       } else {
@@ -314,12 +317,24 @@ class SegmentPrefetchManager {
       }
     } catch (e) {
       if (kDebugMode) {
-        debugPrint('[PREFETCH-BOOSTER] Error prefetching $url: $e');
+        debugPrint(
+          '[PREFETCH-BOOSTER] Error prefetching ${_safeLabel(url)}: '
+          '${e.runtimeType}',
+        );
       }
       completer.complete(null);
     } finally {
       _inFlight.remove(normKey);
     }
+  }
+
+  static String _safeLabel(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return 'invalid-url';
+    final path = uri.path.length > 80
+        ? '${uri.path.substring(0, 80)}…'
+        : uri.path;
+    return '${uri.host}$path';
   }
 
   void _putCache(String key, CachedSegment segment) {

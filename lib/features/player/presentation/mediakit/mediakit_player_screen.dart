@@ -113,7 +113,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   Timer? _midstreamStallWatchdog;
   DateTime? _attemptOpenedAt;
   Duration _attemptStartAt = Duration.zero;
-  bool _attemptReachedPicture = false;
+  bool _attemptHasVideoTrack = false;
+  bool _attemptSawVideoParamsReset = false;
   String _attemptProviderId = '';
 
   /// Whether the current source has already been reopened through the local
@@ -121,14 +122,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// is retried once through the proxy, never in a loop.
   bool _attemptTriedProxy = false;
 
-  /// Whether the current source has already been reopened *without* the proxy
-  /// after a silent open. The pair gives each source one turn on each path:
-  /// a proxied open that never draws gets the direct URL, and vice versa.
+  /// Whether the current source has been opened directly. Direct is the
+  /// normal first path; the proxy gets one fallback turn when needed.
   bool _attemptTriedDirect = false;
 
-  /// "Failed to recognize file format" errors for the current attempt. mpv
+  /// "Failed to recognize file format" errors for the current open path. mpv
   /// emits one per segment after it falls back to reading an unopenable
-  /// playlist as plain text; three before a picture means the source is dead.
+  /// playlist as plain text; three errors trigger the other path before the
+  /// source is marked dead.
   int _unrecognizedFormatErrors = 0;
 
   /// The leash the current attempt was given, kept so the record made when it
@@ -588,7 +589,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _midstreamStallWatchdog?.cancel();
     _startupWatchdog = null;
     _attemptOpenedAt = null;
-    _attemptReachedPicture = false;
+    _attemptHasVideoTrack = false;
+    _attemptSawVideoParamsReset = false;
     _attemptProviderId = '';
     _attemptTriedProxy = false;
     _attemptTriedDirect = false;
@@ -632,29 +634,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         _position = pos;
         _subtitlePlayback.tick(pos);
         _maybeRecordProgress(pos);
-
-        // First movement of the clock is the source's successful start. The
-        // delay keeps the previous media's last ticks from being read as the
-        // new one's; the watchdog only waits for the same movement.
-        final openedAt = _attemptOpenedAt;
-        if (!_attemptReachedPicture &&
-            openedAt != null &&
-            DateTime.now().difference(openedAt) >=
-                const Duration(milliseconds: 600) &&
-            pos > _attemptStartAt + const Duration(milliseconds: 400)) {
-          _attemptReachedPicture = true;
-          _startupWatchdog?.cancel();
-          _startupWatchdog = null;
-          _trace?.lap(
-            'first-picture',
-            'attempt=$_attemptIndex '
-                'since-open=${DateTime.now().difference(openedAt).inMilliseconds}ms',
-          );
-          _recordProviderHealth(
-            success: true,
-            responseTime: DateTime.now().difference(openedAt),
-          );
-        }
 
         final remaining = _duration - pos;
 
@@ -703,6 +682,31 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _player.stream.duration.listen((dur) {
         if (_disposed || !mounted) return;
         setState(() => _duration = dur);
+      }),
+    );
+
+    _subscriptions.add(
+      _player.stream.videoParams.listen((params) {
+        if (_disposed || _attemptOpenedAt == null) return;
+        // libmpv emits empty video parameters when a new file is opened. Wait
+        // for that reset before accepting dimensions, so a late event from
+        // the previous source cannot satisfy this attempt's startup check.
+        if ((params.w ?? 0) <= 0 || (params.h ?? 0) <= 0) {
+          _attemptSawVideoParamsReset = true;
+          return;
+        }
+        if (!_attemptSawVideoParamsReset || _attemptHasVideoTrack) return;
+        final openedAt = _attemptOpenedAt!;
+        final elapsed = DateTime.now().difference(openedAt);
+        _attemptHasVideoTrack = true;
+        _startupWatchdog?.cancel();
+        _startupWatchdog = null;
+        _trace?.lap(
+          'video-ready',
+          'attempt=$_attemptIndex ${params.w}x${params.h} '
+              'since-open=${elapsed.inMilliseconds}ms',
+        );
+        _recordProviderHealth(success: true, responseTime: elapsed);
       }),
     );
 
@@ -783,7 +787,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         setState(() => _isBuffering = isBuffering);
 
         if (isBuffering &&
-            _attemptReachedPicture &&
+            _attemptHasVideoTrack &&
             !_isLoading &&
             !_isSwitching) {
           _midstreamStallWatchdog?.cancel();
@@ -843,19 +847,32 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         if (_isSettlingTrackChange) return;
         // mpv falls back to reading an HLS playlist as plain text when the
         // stream cannot be opened, then tries every segment as its own file
-        // and reports this error for each. Three in a row before any picture
-        // means the source is dead: move on instead of waiting out the timer.
-        if (!_attemptReachedPicture &&
+        // and reports this error for each. Three in a row before video track
+        // parameters appear means this open path is unusable: try the other
+        // path before moving on to another source.
+        if (!_attemptHasVideoTrack &&
             err.contains('Failed to recognize file format')) {
           _unrecognizedFormatErrors++;
           if (_unrecognizedFormatErrors >= 3) {
             _unrecognizedFormatErrors = 0;
-            _trace?.warn('bad-format', 'attempt=$_attemptIndex');
-            _recordProviderHealth(
-              success: false,
-              reason: 'stream not recognised',
-            );
-            _failoverNext();
+            // A proxied HLS playlist can be readable while the CDN rejects
+            // the rewritten segment requests. The direct reopen is cheap and
+            // has recovered these sources in a few seconds; don't score the
+            // provider as dead or wait for the silent-open watchdog first.
+            if (!_attemptTriedProxy) {
+              _errorRecoveryTimer?.cancel();
+              unawaited(_retryProxyAfterBadFormat(_openToken));
+            } else if (!_attemptTriedDirect) {
+              _errorRecoveryTimer?.cancel();
+              unawaited(_retryDirectAfterBadFormat(_openToken));
+            } else {
+              _trace?.warn('bad-format', 'attempt=$_attemptIndex');
+              _recordProviderHealth(
+                success: false,
+                reason: 'stream not recognised',
+              );
+              _failoverNext();
+            }
             return;
           }
         }
@@ -867,6 +884,38 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   bool get _isSettlingTrackChange {
     final until = _trackSettlingUntil;
     return until != null && DateTime.now().isBefore(until);
+  }
+
+  Future<void> _retryDirectAfterBadFormat(int token) async {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
+    final stream = streams[_attemptIndex];
+    final url = AppUtils.normalizeUrl(stream.url);
+    final headers = playbackHeaders(stream);
+    final at = _attemptStartAt > Duration.zero ? _attemptStartAt : null;
+
+    _trace?.warn('bad-format', 'proxy attempt=$_attemptIndex; retrying direct');
+    if (await _tryDirectOpen(url, headers, at, token)) return;
+    if (_disposed || !mounted || token != _openToken) return;
+
+    _recordProviderHealth(success: false, reason: 'stream not recognised');
+    _failoverNext();
+  }
+
+  Future<void> _retryProxyAfterBadFormat(int token) async {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
+    final stream = streams[_attemptIndex];
+    final url = AppUtils.normalizeUrl(stream.url);
+    final headers = playbackHeaders(stream);
+    final at = _attemptStartAt > Duration.zero ? _attemptStartAt : null;
+
+    _trace?.warn('bad-format', 'direct attempt=$_attemptIndex; retrying proxy');
+    if (await _tryProxyFallback(url, headers, at, token)) return;
+    if (_disposed || !mounted || token != _openToken) return;
+
+    _recordProviderHealth(success: false, reason: 'stream not recognised');
+    _failoverNext();
   }
 
   void _holdThroughTrackChange() {
@@ -913,18 +962,22 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// [_recoverFromSilentOpen]).
   void _armStartupWatchdog(int token) {
     _startupWatchdog?.cancel();
-    _attemptOpenedAt = DateTime.now();
+    final openedAt = _attemptOpenedAt ??= DateTime.now();
     final wait = _attemptWatchdogWait = _watchdogWait;
-    _startupWatchdog = Timer(wait, () {
-      if (_disposed || !mounted || token != _openToken) return;
-      if (_attemptReachedPicture || _isSettlingTrackChange) return;
-      _trace?.warn(
-        'no-picture',
-        'watchdog-${wait.inSeconds}s attempt=$_attemptIndex '
-            'proxy-tried=$_attemptTriedProxy direct-tried=$_attemptTriedDirect',
-      );
-      unawaited(_recoverFromSilentOpen(token));
-    });
+    final remaining = wait - DateTime.now().difference(openedAt);
+    _startupWatchdog = Timer(
+      remaining.isNegative ? Duration.zero : remaining,
+      () {
+        if (_disposed || !mounted || token != _openToken) return;
+        if (_attemptHasVideoTrack || _isSettlingTrackChange) return;
+        _trace?.warn(
+          'no-picture',
+          'watchdog-${wait.inSeconds}s attempt=$_attemptIndex '
+              'proxy-tried=$_attemptTriedProxy direct-tried=$_attemptTriedDirect',
+        );
+        unawaited(_recoverFromSilentOpen(token));
+      },
+    );
   }
 
   void _rememberMpvLine(String line) {
@@ -984,12 +1037,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   /// What to do about a source that opened and never drew.
   ///
-  /// Each source gets one turn on each open path before it is abandoned. A
-  /// direct open that never drew is retried through the local proxy, whose
-  /// relabelled bodies and rewritten playlist are what some chunk CDNs need; a
-  /// proxied open that never drew is retried on the engine's own HTTP stack,
-  /// because the proxy is also an extra hop, a header rewrite and a DNS answer,
-  /// and any of the three can be the reason the picture never came.
+  /// A direct open that never produced a video track gets one proxy retry,
+  /// whose playlist rewriting and segment relabelling help with some CDNs.
+  /// Direct is the normal first path because it avoids an unnecessary local
+  /// HTTP hop for streams that mpv can open itself.
   Future<void> _recoverFromSilentOpen(int token) async {
     final streams = _resolved?.streams ?? _candidates;
     if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
@@ -1247,9 +1298,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _startupWatchdog = null;
     _attemptOpenedAt = null;
     _attemptStartAt = at ?? Duration.zero;
-    _attemptReachedPicture = false;
+    _attemptHasVideoTrack = false;
+    _attemptSawVideoParamsReset = false;
     _attemptTriedProxy = false;
-    _attemptTriedDirect = false;
+    _attemptTriedDirect = true;
     _unrecognizedFormatErrors = 0;
     _attemptProviderId = providerIdForStream(
       stream,
@@ -1262,29 +1314,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _loadSourceSubtitles(stream, headers, at ?? Duration.zero);
 
     try {
-      final bool isAlreadyProxied =
-          url.startsWith('http://127.0.0.1:') ||
-          url.startsWith('http://localhost:');
-      final bool shouldRouteThroughShield =
-          !isAlreadyProxied &&
-          (headers.isNotEmpty ||
-              url.toLowerCase().contains('.m3u8') ||
-              url.toLowerCase().contains('.mpd'));
-
-      String playUrl = url;
-      Map<String, String>? playHeaders = headers;
-
-      if (shouldRouteThroughShield) {
-        await LocalProxyService.instance.startServer();
-        playUrl = LocalProxyService.instance.getProxyUrl(url, headers: headers);
-        _attemptTriedProxy = true;
-        playHeaders = const {'X-Local-Proxy': '1'};
-        if (_player.platform is NativePlayer) {
-          final native = _player.platform as NativePlayer;
-          await native.setProperty('referer', '');
-          await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
-        }
-      } else if (_player.platform is NativePlayer) {
+      // Open the provider URL on mpv first. playbackHeaders() always supplies a
+      // User-Agent, so treating any non-empty header map as a reason to use
+      // the local proxy routed every normal HTTP stream through an extra hop.
+      // The proxy remains the one-shot fallback for streams that need playlist
+      // rewriting, header repair, or disguised-segment relabelling.
+      if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
         await native.setProperty('referer', referer ?? '');
@@ -1298,8 +1333,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         await native.setProperty('http-header-fields', extraFields.join(','));
       }
 
+      _attemptOpenedAt = DateTime.now();
       await _player.open(
-        Media(playUrl, httpHeaders: playHeaders, start: at),
+        Media(url, httpHeaders: headers, start: at),
         play: true,
       );
       if (_disposed || !mounted || token != _openToken) return;
@@ -1339,6 +1375,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     }
     _attemptTriedProxy = true;
     try {
+      _unrecognizedFormatErrors = 0;
       await LocalProxyService.instance.startServer();
       final proxyUrl = LocalProxyService.instance.getProxyUrl(
         url,
@@ -1349,6 +1386,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         await native.setProperty('referer', '');
         await native.setProperty('http-header-fields', 'X-Local-Proxy: 1');
       }
+      _attemptOpenedAt = DateTime.now();
+      _attemptHasVideoTrack = false;
+      _attemptSawVideoParamsReset = false;
       await _player.open(
         Media(proxyUrl, httpHeaders: headers, start: at),
         play: true,
@@ -1394,6 +1434,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     }
     _attemptTriedDirect = true;
     try {
+      _unrecognizedFormatErrors = 0;
       if (_player.platform is NativePlayer) {
         final native = _player.platform as NativePlayer;
         final referer = headers['Referer'] ?? headers['referer'];
@@ -1407,6 +1448,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         });
         await native.setProperty('http-header-fields', extraFields.join(','));
       }
+      _attemptOpenedAt = DateTime.now();
+      _attemptHasVideoTrack = false;
+      _attemptSawVideoParamsReset = false;
       await _player.open(
         Media(url, httpHeaders: headers, start: at),
         play: true,

@@ -11,6 +11,7 @@ import '../media/cenc.dart';
 import '../media/dash_manifest.dart';
 import '../network/doh_resolver.dart';
 import '../network/http_defaults.dart';
+import '../network/probe_answer.dart';
 import 'segment_prefetch_manager.dart';
 
 class ProxyOptions {
@@ -660,9 +661,23 @@ class LocalProxyService {
           targetUrl,
           cached.statusCode,
         );
+        String? cachedContentType;
+        for (final entry in cached.headers.entries) {
+          if (entry.key.toLowerCase() == 'content-type') {
+            cachedContentType = entry.value;
+            break;
+          }
+        }
+        final relabelCached = relabelDisguised &&
+            !(cachedContentType != null &&
+                _isTextualType(cachedContentType) &&
+                isWebPage(
+                  cachedContentType,
+                  cached.bytes.take(kProbeSniffBytes).toList(),
+                ));
         cached.headers.forEach((k, v) {
           final lk = k.toLowerCase();
-          if (relabelDisguised) {
+          if (relabelCached) {
             if (lk == 'x-content-type-options') return;
             if (lk == 'content-type' && _isTextualType(v)) {
               request.response.headers.set('content-type', 'video/mp2t');
@@ -690,6 +705,8 @@ class LocalProxyService {
     // is stripped for M3U8 responses further down (the body is rewritten, so
     // its size changes).
     final client = _clientFor(autoUncompress: isRequestM3u8);
+    StreamIterator<List<int>>? responseIterator;
+    List<int>? firstResponseChunk;
 
     try {
       final req = await DohResolver.instance.openUrl(
@@ -861,12 +878,30 @@ class LocalProxyService {
               .contains('gzip') ==
           true;
       // A CDN that serves .ts chunks from .html paths as text/html with
-      // nosniff leaves mpv unable to demux them. Only a successful body may
-      // be relabelled: an error or block page keeps its real type so the
-      // engine fails fast instead of stalling on HTML.
+      // nosniff leaves mpv unable to demux them. Some block pages are 200s,
+      // though, so sniff textual bodies before relabelling and leave a real
+      // HTML document's type intact for quick failure handling.
       final relabelDisguised =
           !isResponseM3u8 &&
           _isDisguisedSegment(targetUrl, response.statusCode);
+      var isHtmlBlockPage = false;
+      final responseType = response.headers.contentType?.mimeType ?? '';
+      if (relabelDisguised &&
+          !wasGzip &&
+          _isTextualType(responseType)) {
+        responseIterator = StreamIterator<List<int>>(response);
+        if (await responseIterator.moveNext()) {
+          firstResponseChunk = responseIterator.current;
+          isHtmlBlockPage = isWebPage(
+            responseType,
+            firstResponseChunk!.take(kProbeSniffBytes).toList(),
+          );
+        }
+      }
+      final relabelMedia =
+          relabelDisguised && !isHtmlBlockPage &&
+          !(wasGzip && _isTextualType(responseType)) &&
+          (responseIterator == null || firstResponseChunk != null);
 
       response.headers.forEach((name, values) {
         final lowerName = name.toLowerCase();
@@ -884,7 +919,7 @@ class LocalProxyService {
         // Drop the lying content-range from CDN edge-decompression mismatch.
         if (lowerName == 'content-range' && misleadingContentRange) return;
 
-        if (relabelDisguised) {
+        if (relabelMedia) {
           if (lowerName == 'x-content-type-options') return;
           if (lowerName == 'content-type' && values.any(_isTextualType)) {
             request.response.headers.set('content-type', 'video/mp2t');
@@ -922,13 +957,28 @@ class LocalProxyService {
         );
       } else {
         // Pipe binary data (segments, keys, etc.)
-        await response.pipe(request.response);
+        if (responseIterator == null) {
+          await response.pipe(request.response);
+        } else {
+          if (firstResponseChunk != null) {
+            request.response.add(firstResponseChunk!);
+          }
+          while (await responseIterator.moveNext()) {
+            request.response.add(responseIterator.current);
+          }
+          await request.response.close();
+          await responseIterator.cancel();
+          responseIterator = null;
+        }
       }
       _remember(
         '$label ${response.statusCode}'
         '${isResponseM3u8 ? ' m3u8' : ''} ${watch.elapsedMilliseconds}ms',
       );
     } catch (e) {
+      try {
+        await responseIterator?.cancel();
+      } catch (_) {}
       if (kDebugMode) debugPrint("LocalProxyService: Proxy Request Error: $e");
       _remember('ERR $label ${watch.elapsedMilliseconds}ms ${e.runtimeType}');
       // mpv drops connections constantly — every seek, track change and
@@ -1024,6 +1074,7 @@ class LocalProxyService {
   ) async {
     HttpClientRequest currentReq = initialRequest;
     currentReq.followRedirects = false; // We handle it
+    final originalHost = Uri.parse(currentUrl).host;
 
     int redirectCount = 0;
     const maxRedirects = 5;
@@ -1049,17 +1100,24 @@ class LocalProxyService {
         );
         nextReq.followRedirects = false;
 
-        // Credentials only follow a redirect within the same host. A CDN hop
-        // is where a bearer token turns into someone else's bearer token.
-        final sameHost = Uri.parse(nextUrl).host == Uri.parse(currentUrl).host;
+        // Never forward credentials to a different host. A CDN hop is where
+        // a session cookie or bearer token can otherwise escape to an
+        // unrelated origin.
+        final sameHost = Uri.parse(nextUrl).host == originalHost;
 
         // PRESERVE CRITICAL HEADERS
         initialRequest.headers.forEach((name, values) {
           final lowerName = name.toLowerCase();
+          final isCredential = lowerName == 'authorization' ||
+              lowerName == 'proxy-authorization' ||
+              lowerName == 'cookie' ||
+              lowerName == 'cookie2' ||
+              lowerName == 'x-api-key' ||
+              lowerName.endsWith('-token');
           if (lowerName != 'host' &&
               lowerName != 'content-length' &&
               lowerName != 'connection' &&
-              (sameHost || lowerName != 'authorization')) {
+              (sameHost || !isCredential)) {
             for (final v in values) {
               nextReq.headers.add(name, v);
             }
@@ -1105,15 +1163,33 @@ class LocalProxyService {
 
   bool _isM3u8(String? mimeType, String url) {
     final lowerUrl = url.toLowerCase();
-    return (mimeType == "application/vnd.apple.mpegurl" ||
-        mimeType == "application/x-mpegurl" ||
-        mimeType == "audio/x-mpegurl" ||
-        mimeType == "video/x-mpegurl" ||
-        lowerUrl.contains(".m3u8") ||
-        lowerUrl.contains(".m3u") ||
-        lowerUrl.contains("play.php") ||
-        lowerUrl.contains("index.php") ||
-        lowerUrl.contains("playlist.php"));
+    final type = mimeType?.toLowerCase().split(';').first.trim() ?? '';
+    if (type == 'application/vnd.apple.mpegurl' ||
+        type == 'application/x-mpegurl' ||
+        type == 'audio/x-mpegurl' ||
+        type == 'video/x-mpegurl') {
+      return true;
+    }
+
+    final uri = Uri.tryParse(url);
+    final path = uri?.path.toLowerCase() ?? lowerUrl;
+    if (path.endsWith('.m3u8') ||
+        path.endsWith('.m3u') ||
+        (uri?.query.toLowerCase().contains('.m3u8') ?? false)) {
+      return true;
+    }
+
+    // Dynamic playlist endpoints are common, but names like index.php are
+    // also used for progressive files and JSON APIs. Only infer HLS from one
+    // when the server describes the body as text or leaves the type blank.
+    final isTextLike =
+        type.isEmpty ||
+        type.startsWith('text/') ||
+        type == 'application/octet-stream';
+    return isTextLike &&
+        (path.endsWith('/play.php') ||
+            path.endsWith('/index.php') ||
+            path.endsWith('/playlist.php'));
   }
 
   Future<void> _rewriteM3u8Response(
@@ -1128,7 +1204,11 @@ class LocalProxyService {
 
     if (!_isValidM3u8(allBytes)) {
       // debugPrint("[PROXY] M3U8 Validation Failed for: $originalUrl");
-      // Fallback to binary pipe
+      // URL heuristics can identify a playlist endpoint that now answers with
+      // a login/block page. Restore its upstream type so the engine fails on
+      // that page instead of treating it as a playlist.
+      clientRequest.response.headers.contentType =
+          sourceResponse.headers.contentType ?? ContentType.binary;
       clientRequest.response.add(allBytes);
       await clientRequest.response.close();
       return;
