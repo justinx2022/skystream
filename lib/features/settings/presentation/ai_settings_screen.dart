@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/utils/layout_constants.dart';
+import '../../../../shared/widgets/text_input_dialog.dart';
 import 'ai_settings_provider.dart';
 import 'widgets/settings_widgets.dart';
 
@@ -319,51 +320,27 @@ class AiSettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showApiKeyDialog(
+  Future<void> _showApiKeyDialog(
     BuildContext context,
     WidgetRef ref,
     String currentKey,
-  ) {
-    final controller = TextEditingController(text: currentKey);
-    showDialog<void>(
+  ) async {
+    final result = await showDialog<String>(
       context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Custom Dahl API Key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Leave blank to use SkyStream\'s shared 100M token pool, '
-              'or enter your private Dahl Inference key:',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                hintText: 'dahl_...',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              ref
-                  .read(aiSettingsProvider.notifier)
-                  .update((AiSettings s) => s.copyWith(dahlApiKey: controller.text.trim()));
-              Navigator.pop(dialogContext);
-            },
-            child: const Text('Save'),
-          ),
-        ],
+      builder: (BuildContext dialogContext) => TextInputDialog(
+        title: 'Custom Dahl API Key',
+        message: 'Leave blank to use SkyStream\'s shared 100M token pool, '
+            'or enter your private Dahl Inference key:',
+        initialText: currentKey,
+        hintText: 'dahl_...',
+        confirmLabel: 'Save',
+        allowEmpty: true,
       ),
     );
+    if (result != null) {
+      await ref
+          .read(aiSettingsProvider.notifier)
+          .update((AiSettings s) => s.copyWith(dahlApiKey: result.trim()));
+    }
   }
 }
