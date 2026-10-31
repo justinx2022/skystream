@@ -21,6 +21,7 @@ import '../../../core/services/download_service.dart';
 import '../data/metadata_resolution_service.dart';
 import 'downloaded_file_provider.dart';
 import '../../tracking/data/simkl_service.dart';
+import '../../../core/services/stream_prewarmer.dart';
 
 part 'details_controller.g.dart';
 
@@ -288,6 +289,18 @@ class DetailsController extends _$DetailsController {
 
         _processEpisodes(itemToUse.episodes, itemToUse);
         state = state.copyWith(details: AsyncData(itemToUse));
+
+        // Speculatively pre-warm stream for instant playback (Netflix Warm Start)
+        final targetEp = state.targetEpisode ?? itemToUse.episodes?.firstOrNull;
+        final targetUrl = targetEp?.url ?? itemToUse.url;
+        unawaited(
+          StreamPrewarmer.instance.prewarm(
+            item: itemToUse,
+            targetUrl: targetUrl,
+            read: ref.read,
+            episode: targetEp,
+          ),
+        );
         return;
       }
 
@@ -327,6 +340,18 @@ class DetailsController extends _$DetailsController {
 
         // Run Metadata Resolution in background silently (fire-and-forget).
         unawaited(_resolveMetadataInBackground(withProvider));
+
+        // Speculatively pre-warm stream for instant playback (Netflix Warm Start)
+        final targetEp = state.targetEpisode ?? sortedEpisodes?.firstOrNull;
+        final targetUrl = targetEp?.url ?? withProvider.url;
+        unawaited(
+          StreamPrewarmer.instance.prewarm(
+            item: withProvider,
+            targetUrl: targetUrl,
+            read: ref.read,
+            episode: targetEp,
+          ),
+        );
       } else {
         throw Exception("No provider selected or found for this item");
       }

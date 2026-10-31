@@ -71,6 +71,19 @@ Map<String, String> playbackHeaders(StreamResult stream) {
   final headers = <String, String>{...?stream.headers};
   final hasUserAgent = headers.keys.any((k) => k.toLowerCase() == 'user-agent');
   if (!hasUserAgent) headers['User-Agent'] = kDefaultBrowserUserAgent;
+
+  // Auto-synthesize Referer and Origin if absent so CDNs do not reject with 403
+  final uri = Uri.tryParse(stream.url);
+  final hasReferer = headers.keys.any((k) => k.toLowerCase() == 'referer');
+  if (!hasReferer && uri != null && uri.host.isNotEmpty) {
+    headers['Referer'] = '${uri.scheme}://${uri.host}/';
+  }
+
+  final hasOrigin = headers.keys.any((k) => k.toLowerCase() == 'origin');
+  if (!hasOrigin && uri != null && uri.host.isNotEmpty) {
+    headers['Origin'] = '${uri.scheme}://${uri.host}';
+  }
+
   return headers;
 }
 
@@ -606,7 +619,7 @@ const int kSpeedProbeCandidates = 4;
 /// Only a mirror that has not answered by now is waited on; a preferred source
 /// that answers quickly opens immediately. The cap is deliberately below the
 /// time a single stalled link used to cost the engine.
-const Duration kSpeedProbeBudget = Duration(milliseconds: 1600);
+const Duration kSpeedProbeBudget = Duration(milliseconds: 1200);
 
 /// Speed-checks candidates in priority order, [limit] at a time, and opens the
 /// quickest reachable mirror of the preferred candidate's quality tier.
@@ -915,10 +928,10 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
           : const <int>[];
       return _ProbeAnswer(_outcomeOf(uri, resp, head), ttfb);
     }
-    // CDNs (Cloudflare, Akamai) often reject synthetic probes with 403 Forbidden
-    // while streaming perfectly in full media player engines.
+    // A 403 or 405 from the initial probe indicates a dead or blocked CDN edge;
+    // do not declare healthy so failover and speed probing pick an active mirror.
     if (resp.statusCode == 403 || resp.statusCode == 405) {
-      return _ProbeAnswer(ProbeOutcome.healthy, ttfb);
+      return _ProbeAnswer(ProbeOutcome.unhealthy, ttfb);
     }
   } catch (_) {
     // Fall through to the HEAD.

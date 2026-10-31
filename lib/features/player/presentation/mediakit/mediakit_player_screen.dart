@@ -19,6 +19,7 @@ import '../../../../core/network/http_defaults.dart';
 import '../../../../core/providers/device_info_provider.dart';
 import '../../../../core/services/local_proxy_service.dart';
 import '../../../../core/services/provider_health_service.dart';
+import '../../../../core/services/stream_prewarmer.dart';
 import '../../../../core/services/neural_media_enhancer.dart';
 import '../../../settings/presentation/ai_settings_provider.dart';
 import '../../../../core/utils/app_utils.dart';
@@ -85,6 +86,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   Episode? _currentEpisode;
   Episode? _nextEpisodeOffer;
   bool _nextEpisodeDeclined = false;
+  bool _hasPrewarmedNextEpisode = false;
 
   final List<StreamSubscription<Object?>> _subscriptions = [];
   Duration? _dragPosition;
@@ -348,9 +350,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('cache', 'yes');
           await native.setProperty('cache-pause', 'no'); // Instant first frame
           await native.setProperty('demuxer-hysteresis', '1'); // Instant seek recovery
-          // Fast container analysis for instant playback
-          await native.setProperty('demuxer-lavf-probesize', '200000');
-          await native.setProperty('demuxer-lavf-analyzeduration', '300000');
+          // Netflix-grade fast container analysis for ultra-low latency start
+          await native.setProperty('demuxer-lavf-probesize', '65536');
+          await native.setProperty('demuxer-lavf-analyzeduration', '50000');
+          await native.setProperty('hr-seek', 'yes');
+          await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
           await native.setProperty('stream-lavf-o', 'timeout=10000000');
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
@@ -379,10 +383,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('cache-pause', 'no'); // Zero-latency start
           await native.setProperty('demuxer-hysteresis', '1'); // Micro-seek latch
 
-          // Fast container analysis for instant playback
-          await native.setProperty('demuxer-lavf-probesize', '131072');    // 128KB fast probe
-          await native.setProperty('demuxer-lavf-analyzeduration', '150000'); // 150ms max analyze
-          await native.setProperty('network-timeout', '10');                // 10s connect timeout
+          // Netflix-grade fast container analysis for ultra-low latency start
+          await native.setProperty('demuxer-lavf-probesize', '65536');
+          await native.setProperty('demuxer-lavf-analyzeduration', '50000');
+          await native.setProperty('hr-seek', 'yes');
+          await native.setProperty('hr-seek-framedrop', 'yes');
+          await native.setProperty('network-timeout', '10');
 
           // Treat localhost as local (disable network buffering logic)
           await native.setProperty('stream-lavf-o', 'timeout=10000000');
@@ -554,6 +560,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _attemptIndex = 0;
       _nextEpisodeOffer = null;
       _nextEpisodeDeclined = false;
+      _hasPrewarmedNextEpisode = false;
     });
 
     await _startPlayback();
@@ -596,6 +603,25 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         }
 
         final remaining = _duration - pos;
+
+        // Speculatively pre-warm next episode at 80% progress (Netflix Warm Start)
+        if (_hasNextEpisode &&
+            !_hasPrewarmedNextEpisode &&
+            _duration > const Duration(minutes: 3) &&
+            pos.inMilliseconds / _duration.inMilliseconds >= 0.80) {
+          _hasPrewarmedNextEpisode = true;
+          final next = _nextEpisode;
+          if (next != null) {
+            unawaited(
+              StreamPrewarmer.instance.prewarm(
+                item: _item,
+                targetUrl: next.url,
+                read: _read,
+                episode: next,
+              ),
+            );
+          }
+        }
 
         // Offer Next Episode for the same fifteen seconds its countdown shows.
         // Offering it earlier left the card counting down from fifteen while
@@ -924,7 +950,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         read: _read,
         item: _item,
         videoUrl: _currentVideoUrl,
-        preloadedStreams: _currentVideoUrl == widget.videoUrl ? widget.preloadedStreams : null,
+        preloadedStreams: _currentVideoUrl == widget.videoUrl
+            ? (widget.preloadedStreams ??
+                StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams)
+            : StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams,
         // The first few mirrors are speed-raced, including a tapped one: an
         // answer opens as picked, and only a source that leaves the screen
         // waiting gives its place to a quicker mirror of the same quality.

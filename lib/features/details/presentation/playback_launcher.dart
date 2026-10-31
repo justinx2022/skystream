@@ -17,6 +17,7 @@ import 'details_controller.dart';
 import '../../../core/services/download_service.dart';
 import '../../../shared/widgets/loading_dialog.dart';
 import '../../../core/utils/app_utils.dart';
+import '../../../core/services/stream_prewarmer.dart';
 
 import 'package:skystream/l10n/generated/app_localizations.dart';
 
@@ -76,11 +77,13 @@ class PlaybackLauncher {
         }
       });
     } else {
+      final prewarmed = StreamPrewarmer.instance.getPrewarmed(finalUrl);
       await _openInternal(
         context,
         detailedItem ?? baseItem,
         finalUrl,
         episode: resolvedEpisode,
+        preloadedStreams: prewarmed?.streams ?? const <StreamResult>[],
       );
     }
   }
