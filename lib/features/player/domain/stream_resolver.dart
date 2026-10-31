@@ -31,7 +31,6 @@ import '../../../l10n/generated/app_localizations.dart';
 import '../../../core/services/provider_health_service.dart';
 import '../../../core/services/dahl_service.dart';
 import '../../library/presentation/history_provider.dart';
-import '../../settings/presentation/ai_settings_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
 /// Just enough of Riverpod to read providers. Both `Ref.read` and
@@ -71,18 +70,6 @@ Map<String, String> playbackHeaders(StreamResult stream) {
   final headers = <String, String>{...?stream.headers};
   final hasUserAgent = headers.keys.any((k) => k.toLowerCase() == 'user-agent');
   if (!hasUserAgent) headers['User-Agent'] = kDefaultBrowserUserAgent;
-
-  // Auto-synthesize Referer and Origin if absent so CDNs do not reject with 403
-  final uri = Uri.tryParse(stream.url);
-  final hasReferer = headers.keys.any((k) => k.toLowerCase() == 'referer');
-  if (!hasReferer && uri != null && uri.host.isNotEmpty) {
-    headers['Referer'] = '${uri.scheme}://${uri.host}/';
-  }
-
-  final hasOrigin = headers.keys.any((k) => k.toLowerCase() == 'origin');
-  if (!hasOrigin && uri != null && uri.host.isNotEmpty) {
-    headers['Origin'] = '${uri.scheme}://${uri.host}';
-  }
 
   return headers;
 }
@@ -438,18 +425,10 @@ Future<ResolvedPlayback> resolvePlayback({
   // (the player keeps it so) because nothing else here waits on it.
   var probeEnabled = true;
   try {
-    final aiSettings = read(aiSettingsProvider).asData?.value;
-    if (aiSettings?.aiEnabled == true) {
-      // In AI Neural mode, disable synthetic HTTP range pre-probing entirely.
-      // Synthetic probes trigger CDN bot protections (403/405), causing the resolver
-      // to falsely discard top-quality 1080p/4K links in favor of unprotected low-tier mirrors.
-      probeEnabled = false;
-    } else {
-      probeEnabled =
-          (settings ?? read(playerSettingsProvider).asData?.value)
-              ?.autoHealthScoringEnabled ??
-          true;
-    }
+    probeEnabled =
+        (settings ?? read(playerSettingsProvider).asData?.value)
+            ?.autoHealthScoringEnabled ??
+        true;
   } catch (_) {}
 
   final saved = handPicked ? 0 : _savedStreamIndex(read, item, streams);
