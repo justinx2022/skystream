@@ -29,7 +29,6 @@ import '../../../core/utils/app_utils.dart';
 import '../../../core/utils/stream_quality_sorter.dart';
 import '../../../l10n/generated/app_localizations.dart';
 import '../../../core/services/provider_health_service.dart';
-import '../../../core/services/dahl_service.dart';
 import '../../library/presentation/history_provider.dart';
 import '../../settings/presentation/player_settings_provider.dart';
 
@@ -343,38 +342,22 @@ Future<ResolvedPlayback> resolvePlayback({
           .toList(growable: false);
       sw.stop();
       try {
-        read(providerHealthServiceProvider).recordSuccess(
-          provider.packageName,
-          responseTime: sw.elapsed,
-        );
+        read(providerHealthServiceProvider)
+            .recordSuccess(provider.packageName, responseTime: sw.elapsed);
       } catch (_) {}
     } catch (e) {
-      // Dahl Self-Healing Scraper Hook
-      var healed = false;
+      // No AI "repair" here. The only thing such a call could be handed is the
+      // exception text — there is no page to read a link out of — so it either
+      // answered NONE or invented a URL that was then played and failed, after
+      // up to nine seconds of waiting. The provider's error is the answer.
       try {
-        final dahl = read(dahlServiceProvider);
-        final healedLink = await dahl.repairBrokenScraper(
-          rawSnippet: '$e',
-          streamHint: '${item.title} $videoUrl',
-        );
-        if (healedLink != null) {
-          raw = [StreamResult(url: healedLink, source: 'Dahl Healed Stream', providerName: 'Dahl AI')];
-          healed = true;
-        }
+        read(providerHealthServiceProvider)
+            .recordFailure(provider?.packageName ?? '', reason: '$e');
       } catch (_) {}
-
-      if (!healed) {
-        try {
-          read(providerHealthServiceProvider).recordFailure(
-            provider?.packageName ?? '',
-            reason: '$e',
-          );
-        } catch (_) {}
-        throw StreamResolutionException(
-          StreamResolutionFailure.loadFailed,
-          detail: '$e',
-        );
-      }
+      throw StreamResolutionException(
+        StreamResolutionFailure.loadFailed,
+        detail: '$e',
+      );
     }
   }
   if (isCancelled?.call() ?? false) {
@@ -895,7 +878,9 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
       'Range',
       () => 'bytes=0-${kProbeSniffBytes - 1}',
     );
-    final resp = await client.send(request).timeout(const Duration(milliseconds: 1000));
+    final resp = await client
+        .send(request)
+        .timeout(const Duration(milliseconds: 1000));
     final ttfb = clock.elapsed;
     // Nothing to range over: an empty file, which the old one-byte check
     // passed too.

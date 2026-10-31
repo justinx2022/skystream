@@ -1,14 +1,17 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 /// Quad-Redundant Encrypted DNS-over-HTTPS (DoH) Resolver.
 ///
-/// Completely bypasses ISP DNS poisoning, sinkholing, and domain blocks
-/// by resolving provider hostnames over encrypted HTTPS queries to Cloudflare,
-/// Google, and Quad9 full-time.
+/// Bypasses ISP DNS poisoning, sinkholing, and domain blocks by resolving
+/// provider hostnames over encrypted HTTPS queries to Cloudflare, Google and
+/// Quad9 — then dials the answer while keeping the hostname on the URL, so TLS
+/// still verifies the name it belongs to.
 class DohResolver {
   DohResolver._();
 
@@ -21,10 +24,10 @@ class DohResolver {
   ];
 
   final Map<String, ({String ip, DateTime expiresAt})> _cache = {};
-  final Set<String> _knownDohIps = {};
 
-  /// Whether [ip] was resolved by this DoH service.
-  bool isKnownIp(String ip) => _knownDohIps.contains(ip);
+  /// Clients already dialing through [installOn]. Identity, not equality:
+  /// `HttpClient` has no value semantics and each one owns its own pool.
+  final Set<HttpClient> _installed = HashSet<HttpClient>.identity();
 
   /// Resolves [hostname] to an IPv4 address, racing top DoH providers.
   Future<String?> resolve(String hostname) async {
@@ -39,26 +42,27 @@ class DohResolver {
 
     for (final endpoint in _dohEndpoints.take(2)) {
       unawaited(
-        _queryDoh(endpoint, hostname).then((ip) {
-          if (ip != null && !completer.isCompleted) {
-            _cache[hostname] = (
-              ip: ip,
-              expiresAt: now.add(const Duration(minutes: 30)),
-            );
-            _knownDohIps.add(ip);
-            completer.complete(ip);
-          } else {
-            remaining--;
-            if (remaining <= 0 && !completer.isCompleted) {
-              completer.complete(null);
-            }
-          }
-        }).catchError((_) {
-          remaining--;
-          if (remaining <= 0 && !completer.isCompleted) {
-            completer.complete(null);
-          }
-        }),
+        _queryDoh(endpoint, hostname)
+            .then((ip) {
+              if (ip != null && !completer.isCompleted) {
+                _cache[hostname] = (
+                  ip: ip,
+                  expiresAt: now.add(const Duration(minutes: 30)),
+                );
+                completer.complete(ip);
+              } else {
+                remaining--;
+                if (remaining <= 0 && !completer.isCompleted) {
+                  completer.complete(null);
+                }
+              }
+            })
+            .catchError((_) {
+              remaining--;
+              if (remaining <= 0 && !completer.isCompleted) {
+                completer.complete(null);
+              }
+            }),
       );
     }
 
@@ -68,52 +72,59 @@ class DohResolver {
     );
   }
 
-  /// Attempts to open an [HttpClientRequest] for [uri] using full-time DoH.
+  /// Installs this resolver as [client]'s dialer.
   ///
-  /// Pre-emptively resolves the hostname via Quad-Redundant Encrypted DoH
-  /// (Cloudflare, Google, Quad9) with a 30-minute memory cache, completely
-  /// bypassing ISP DNS poisoning, sinkholing (e.g. 127.0.0.1 or court-order pages),
-  /// and plain-text DNS eavesdropping.
+  /// DoH still chooses the address, but only the socket is pointed at the
+  /// answer: the URL keeps the real hostname, so TLS sends the right SNI and
+  /// validates the certificate against the name. Rewriting the URL host
+  /// instead, as this used to do, presented an IP to every CDN — Cloudflare-
+  /// fronted hosts answered 403 or failed the handshake, and certificate
+  /// checks had to be disabled to get any proxied traffic through at all.
+  void installOn(HttpClient client) {
+    if (!_installed.add(client)) return;
+    client.connectionFactory = (uri, proxyHost, proxyPort) async {
+      final host = uri.host;
+      final target =
+          _isIpv4(host) || host == 'localhost' || host.endsWith('.local')
+          ? host
+          : await resolve(host) ?? host;
+      final socket = await Socket.connect(
+        target,
+        uri.port,
+      ).timeout(const Duration(seconds: 10));
+      if (uri.scheme != 'https') {
+        return ConnectionTask.fromSocket(Future.value(socket), socket.destroy);
+      }
+      try {
+        final tls = await SecureSocket.secure(socket, host: host);
+        return ConnectionTask.fromSocket(Future.value(tls), tls.destroy);
+      } catch (_) {
+        socket.destroy();
+        rethrow;
+      }
+    };
+  }
+
+  /// Opens [uri] on [client], which must be dialing through [installOn].
+  ///
+  /// Kept as a seam so callers do not each have to know about the dialer; the
+  /// URL itself is never rewritten.
   Future<HttpClientRequest> openUrl({
     required HttpClient client,
     required String method,
     required Uri uri,
-  }) async {
-    // 1. If it's already an IP or local loopback, dial directly
-    if (_isIpv4(uri.host) || uri.host == 'localhost' || uri.host.endsWith('.local')) {
-      return await client.openUrl(method, uri);
-    }
-
-    // 2. Full-Time DoH Resolution
-    final dohIp = await resolve(uri.host);
-    if (dohIp != null && dohIp.isNotEmpty) {
-      final ipUri = uri.replace(host: dohIp);
-      final req = await client.openUrl(method, ipUri);
-      req.headers.set(HttpHeaders.hostHeader, uri.host);
-      return req;
-    }
-
-    // 3. Fallback to OS resolver only if DoH queries failed or timed out
-    try {
-      return await client.openUrl(method, uri);
-    } on SocketException catch (se) {
-      if (kDebugMode) {
-        debugPrint('[DOH-MESH] OS lookup failed for ${uri.host}: $se');
-      }
-      rethrow;
-    }
+  }) {
+    installOn(client);
+    return client.openUrl(method, uri);
   }
 
   Future<String?> _queryDoh(String endpoint, String hostname) async {
     try {
-      final uri = Uri.parse(endpoint).replace(queryParameters: {
-        'name': hostname,
-        'type': 'A',
-      });
-      final resp = await http.get(
-        uri,
-        headers: {'Accept': 'application/dns-json'},
-      ).timeout(const Duration(milliseconds: 1200));
+      final uri = Uri.parse(endpoint)
+          .replace(queryParameters: {'name': hostname, 'type': 'A'});
+      final resp = await http
+          .get(uri, headers: {'Accept': 'application/dns-json'})
+          .timeout(const Duration(milliseconds: 1200));
 
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -149,6 +160,6 @@ class DohResolver {
 
   void clear() {
     _cache.clear();
-    _knownDohIps.clear();
+    _installed.clear();
   }
 }

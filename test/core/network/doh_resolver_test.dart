@@ -11,18 +11,28 @@ void main() {
   });
 
   group('DohResolver', () {
-    test('DohResolver tracks known IPs and resolves accurately', () async {
-      final resolver = DohResolver.instance;
-      resolver.clear();
+    // The resolver only chooses which address to dial; the URL keeps the real
+    // hostname so TLS sends it as SNI and validates the certificate against
+    // it. Rewriting the host, as it used to, is what made proxied HTTPS
+    // requests fail. Here we only pin the lookup itself.
+    test(
+      'resolves a hostname to an IPv4 answer and reuses the cache',
+      () async {
+        final resolver = DohResolver.instance;
+        resolver.clear();
 
-      expect(resolver.isKnownIp('1.1.1.1'), isFalse);
+        final first = await resolver.resolve('cloudflare-dns.com');
+        // No network in this environment: nothing to assert.
+        if (first == null) return;
 
-      final ip = await resolver.resolve('cloudflare-dns.com');
-      // If network is available, it resolves an IPv4 and adds it to known IPs.
-      if (ip != null) {
-        expect(resolver.isKnownIp(ip), isTrue);
-      }
-    });
+        expect(
+          RegExp(r'^\d{1,3}(\.\d{1,3}){3}$').hasMatch(first),
+          isTrue,
+          reason: 'DoH answers are IPv4 literals, not hostnames',
+        );
+        expect(await resolver.resolve('cloudflare-dns.com'), first);
+      },
+    );
   });
 
   group('ProviderHealthService Quarantine', () {

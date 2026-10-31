@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../features/settings/presentation/ai_settings_provider.dart';
 
 /// Core Service interfacing SkyStream with the Dahl Neural Gateway.
@@ -11,15 +13,17 @@ import '../../../features/settings/presentation/ai_settings_provider.dart';
 /// scene context generation, and dynamic audio/video filter recommendations.
 class DahlService {
   DahlService(this._ref) {
-    _dio = Dio(BaseOptions(
-      baseUrl: 'https://inference.dahl.global/v1',
-      connectTimeout: const Duration(milliseconds: 3500),
-      receiveTimeout: const Duration(milliseconds: 6000),
-      headers: <String, dynamic>{
-        'Content-Type': 'application/json',
-        'User-Agent': 'SkyStream-NeuralCore/2.0',
-      },
-    ));
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: 'https://inference.dahl.global/v1',
+        connectTimeout: const Duration(milliseconds: 3500),
+        receiveTimeout: const Duration(milliseconds: 6000),
+        headers: <String, dynamic>{
+          'Content-Type': 'application/json',
+          'User-Agent': 'SkyStream-NeuralCore/2.0',
+        },
+      ),
+    );
   }
 
   final Ref _ref;
@@ -30,12 +34,13 @@ class DahlService {
     return asyncVal.asData?.value ?? const AiSettings();
   }
 
-  String get _apiKey {
-    final userKey = _getSettings().dahlApiKey.trim();
-    if (userKey.isNotEmpty) return userKey;
-    // Built-in fallback Dahl access token
-    return 'dahl_48nTkdXh1B3npFCoFcLdjTHPG1V6kPDqj';
-  }
+  /// The token the viewer entered, or empty.
+  ///
+  /// There used to be a token baked into this file as a fallback for everyone
+  /// who had not entered one. A credential in published source is a credential
+  /// anyone can spend, so it is gone — and it must be revoked at the provider,
+  /// because shipping it already exposed it.
+  String get _apiKey => _getSettings().dahlApiKey.trim();
 
   String get _model {
     return _getSettings().dahlModel;
@@ -53,21 +58,30 @@ class DahlService {
     String? overrideModel,
   }) async {
     if (!_isEnabled) return null;
+    final apiKey = _apiKey;
+    // Without a key the request could only come back 401 after the full
+    // connect + receive timeout, which on the failure path is time spent not
+    // showing the viewer the real error.
+    if (apiKey.isEmpty) return null;
     try {
       final res = await _dio.post<dynamic>(
         '/chat/completions',
-        options: Options(headers: <String, dynamic>{'Authorization': 'Bearer $_apiKey'}),
+        options: Options(
+          headers: <String, dynamic>{'Authorization': 'Bearer $apiKey'},
+        ),
         data: <String, dynamic>{
           'model': overrideModel ?? _model,
           'messages': <Map<String, String>>[
-            <String, String>{'role': 'user', 'content': prompt}
+            <String, String>{'role': 'user', 'content': prompt},
           ],
           'max_tokens': maxTokens,
           'temperature': temperature,
         },
       );
       if (res.statusCode == 200 && res.data != null) {
-        final dynamic data = res.data is String ? jsonDecode(res.data as String) : res.data;
+        final dynamic data = res.data is String
+            ? jsonDecode(res.data as String)
+            : res.data;
         if (data is Map) {
           final choices = data['choices'];
           if (choices is List && choices.isNotEmpty) {
@@ -99,7 +113,8 @@ class DahlService {
         'Reply ONLY with the absolute raw URL or NONE.';
 
     final out = await complete(prompt: prompt, maxTokens: 200);
-    if (out != null && (out.startsWith('http://') || out.startsWith('https://'))) {
+    if (out != null &&
+        (out.startsWith('http://') || out.startsWith('https://'))) {
       return out.trim();
     }
     return null;

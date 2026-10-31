@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
+
 import '../network/doh_resolver.dart';
 import '../network/http_defaults.dart';
 import 'local_proxy_service.dart';
@@ -64,7 +66,8 @@ class SegmentPrefetchManager {
     if (!enabled || segments.isEmpty) return;
 
     // Prune oldest session if exceeding limit
-    if (_sessions.length >= _maxSessions && !_sessions.containsKey(playlistUrl)) {
+    if (_sessions.length >= _maxSessions &&
+        !_sessions.containsKey(playlistUrl)) {
       final oldestKey = _sessions.keys.first;
       _sessions.remove(oldestKey);
     }
@@ -94,24 +97,25 @@ class SegmentPrefetchManager {
         final segUrl = segments[i];
         final normSeg = _norm(segUrl);
         if (!_cache.containsKey(normSeg) && !_inFlight.containsKey(normSeg)) {
-          unawaited(_triggerPrefetch(
-            url: segUrl,
-            session: session,
-            client: client,
-          ));
+          unawaited(
+            _triggerPrefetch(url: segUrl, session: session, client: client),
+          );
         }
       }
     }
   }
 
   /// Whether a segment is already available in the in-memory cache.
-  bool hasCached(String segmentUrl) => enabled && _cache.containsKey(_norm(segmentUrl));
+  bool hasCached(String segmentUrl) =>
+      enabled && _cache.containsKey(_norm(segmentUrl));
 
   /// Retrieves a prefetched segment from the in-memory cache.
-  CachedSegment? getCached(String segmentUrl) => enabled ? _cache[_norm(segmentUrl)] : null;
+  CachedSegment? getCached(String segmentUrl) =>
+      enabled ? _cache[_norm(segmentUrl)] : null;
 
   /// Whether a segment prefetch task is currently in flight.
-  bool isInFlight(String segmentUrl) => enabled && _inFlight.containsKey(_norm(segmentUrl));
+  bool isInFlight(String segmentUrl) =>
+      enabled && _inFlight.containsKey(_norm(segmentUrl));
 
   /// Awaits the in-flight prefetch task for [segmentUrl].
   Future<CachedSegment?> awaitInFlight(String segmentUrl) {
@@ -139,7 +143,7 @@ class SegmentPrefetchManager {
     final normReq = _norm(segmentUrl);
 
     for (final session in _sessions.values) {
-      final idx = session.segments.indexWhere((s) => _norm(s) == normReq);
+      final idx = session.indexOf(normReq);
       if (idx != -1) {
         matchedSession = session;
         segmentIndex = idx;
@@ -153,7 +157,10 @@ class SegmentPrefetchManager {
     // 2. Compute lookahead window
     final lookAhead = matchedSession.isVod ? _prefetchAheadCount : 1;
     final startIndex = segmentIndex + 1;
-    final endIndex = (startIndex + lookAhead).clamp(0, matchedSession.segments.length);
+    final endIndex = (startIndex + lookAhead).clamp(
+      0,
+      matchedSession.segments.length,
+    );
 
     // 3. Trigger parallel background prefetching
     final client = clientFor(autoUncompress: false);
@@ -161,11 +168,13 @@ class SegmentPrefetchManager {
       final nextUrl = matchedSession.segments[i];
       final normNext = _norm(nextUrl);
       if (!_cache.containsKey(normNext) && !_inFlight.containsKey(normNext)) {
-        unawaited(_triggerPrefetch(
-          url: nextUrl,
-          session: matchedSession,
-          client: client,
-        ));
+        unawaited(
+          _triggerPrefetch(
+            url: nextUrl,
+            session: matchedSession,
+            client: client,
+          ),
+        );
       }
     }
 
@@ -205,14 +214,13 @@ class SegmentPrefetchManager {
         req.headers.set(HttpHeaders.userAgentHeader, kDefaultBrowserUserAgent);
       }
 
-      // 3. Referer
+      // 3. Referer: only one the plugin supplied. Synthesizing `scheme://host/`
+      // is what Cloudflare-fronted mirrors answer with 403; the proxy's own
+      // header pass deliberately sends none in that case.
       if (req.headers.value(HttpHeaders.refererHeader) == null) {
         final optReferer = session.options?.referer;
         if (optReferer != null) {
           req.headers.set(HttpHeaders.refererHeader, optReferer);
-        } else {
-          final uri = Uri.parse(url);
-          req.headers.set(HttpHeaders.refererHeader, '${uri.scheme}://${uri.host}/');
         }
       }
 
@@ -225,7 +233,9 @@ class SegmentPrefetchManager {
         final filtered = cookies
             .split(';')
             .map((s) => s.trim())
-            .where((s) => session.options!.keepCookies.contains(s.split('=')[0]))
+            .where(
+              (s) => session.options!.keepCookies.contains(s.split('=')[0]),
+            )
             .join('; ');
         if (filtered.isNotEmpty) {
           req.headers.set(HttpHeaders.cookieHeader, filtered);
@@ -264,7 +274,8 @@ class SegmentPrefetchManager {
           }
         }
         final lowerUrl = url.toLowerCase();
-        final segmentLike = !lowerUrl.contains('.m3u8') &&
+        final segmentLike =
+            !lowerUrl.contains('.m3u8') &&
             !lowerUrl.contains('.m3u') &&
             (lowerUrl.contains('.ts') ||
                 lowerUrl.contains('.m4s') ||
@@ -328,10 +339,11 @@ class SegmentPrefetchManager {
     if (thresholdIndex <= 0) return;
     for (int i = 0; i < thresholdIndex; i++) {
       if (i < session.segments.length) {
-        final oldUrl = session.segments[i];
-        if (_cache.containsKey(oldUrl)) {
-          _cache.remove(oldUrl);
-          _cacheKeysOrder.remove(oldUrl);
+        // The cache is keyed by the normalized URL — pruning with the raw one
+        // never matched, so old segments sat there until the cap evicted them.
+        final key = _norm(session.segments[i]);
+        if (_cache.remove(key) != null) {
+          _cacheKeysOrder.remove(key);
         }
       }
     }
@@ -362,4 +374,17 @@ class _HlsPrefetchSession {
     this.options,
     required this.lastActive,
   });
+
+  /// Normalized segment URL → its index, built once when the playlist is
+  /// registered. The player asks about every segment it requests, so decoding
+  /// the whole list on each of those calls made a two-hour VOD hitch.
+  late final Map<String, int> _index = () {
+    final index = <String, int>{};
+    for (var i = 0; i < segments.length; i++) {
+      index.putIfAbsent(SegmentPrefetchManager._norm(segments[i]), () => i);
+    }
+    return index;
+  }();
+
+  int indexOf(String normalizedUrl) => _index[normalizedUrl] ?? -1;
 }

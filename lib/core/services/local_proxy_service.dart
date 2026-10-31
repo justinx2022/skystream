@@ -4,7 +4,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
+
 import '../media/cenc.dart';
 import '../media/dash_manifest.dart';
 import '../network/doh_resolver.dart';
@@ -108,6 +110,10 @@ class LocalProxyService {
   /// attacker on café Wi-Fi could harvest those cookies and substitute the
   /// video, with playback simply working (audit W14). Dart's default rejects a
   /// chain or hostname that does not validate, and that is now the behaviour.
+  ///
+  /// DNS still comes from DoH via [DohResolver.installOn], which points the
+  /// socket at the resolved address while leaving the hostname in the URL, so
+  /// TLS sees a name and validates against it rather than against an IP.
   HttpClient _clientFor({required bool autoUncompress}) {
     final existing = autoUncompress ? _uncompressingClient : _rawClient;
     if (existing != null) return existing;
@@ -116,12 +122,7 @@ class LocalProxyService {
       ..idleTimeout = _upstreamIdleTimeout
       ..maxConnectionsPerHost = 12
       ..autoUncompress = autoUncompress;
-    client.badCertificateCallback = (cert, host, port) {
-      if (DohResolver.instance.isKnownIp(host)) {
-        return true;
-      }
-      return false;
-    };
+    DohResolver.instance.installOn(client);
     if (autoUncompress) {
       _uncompressingClient = client;
     } else {
@@ -338,8 +339,9 @@ class LocalProxyService {
 
     final headers = q['h'] == null
         ? <String, String>{}
-        : (jsonDecode(utf8.decode(base64Url.decode(q['h']!))) as Map)
-              .map((k, v) => MapEntry(k.toString(), v.toString()));
+        : (jsonDecode(utf8.decode(base64Url.decode(q['h']!))) as Map).map(
+            (k, v) => MapEntry(k.toString(), v.toString()),
+          );
 
     // Pooled: a ClearKey stream fetches an init segment plus one media
     // segment every few seconds off the same origin, and the manifest is
@@ -353,9 +355,7 @@ class LocalProxyService {
         final kind = q['mpd'] == '1'
             ? 'manifest'
             : (q['init'] == '1' ? 'init' : 'segment');
-        debugPrint(
-          '[CENC] $kind ${upstream?.length ?? -1} bytes <- $target',
-        );
+        debugPrint('[CENC] $kind ${upstream?.length ?? -1} bytes <- $target');
       }
       if (upstream == null) {
         request.response.statusCode = HttpStatus.badGateway;
@@ -371,21 +371,22 @@ class LocalProxyService {
           rewriteDashManifest(
             manifest: utf8.decode(upstream, allowMalformed: true),
             manifestUrl: Uri.parse(target),
-            proxyUrlFor: (upstreamUrl, {required bool isInit}) => _restoreTemplateTokens(
-              Uri(
-                scheme: 'http',
-                host: '127.0.0.1',
-                port: _serverPort,
-                path: '/cenc',
-                queryParameters: <String, String>{
-                  'url': upstreamUrl,
-                  'k': keyHex,
-                  if (q['kid'] != null) 'kid': q['kid']!,
-                  if (q['h'] != null) 'h': q['h']!,
-                  if (isInit) 'init': '1',
-                },
-              ).toString(),
-            ),
+            proxyUrlFor: (upstreamUrl, {required bool isInit}) =>
+                _restoreTemplateTokens(
+                  Uri(
+                    scheme: 'http',
+                    host: '127.0.0.1',
+                    port: _serverPort,
+                    path: '/cenc',
+                    queryParameters: <String, String>{
+                      'url': upstreamUrl,
+                      'k': keyHex,
+                      if (q['kid'] != null) 'kid': q['kid']!,
+                      if (q['h'] != null) 'h': q['h']!,
+                      if (isInit) 'init': '1',
+                    },
+                  ).toString(),
+                ),
           ),
         );
       } else if (q['init'] == '1') {
@@ -546,8 +547,8 @@ class LocalProxyService {
         charset: "utf-8",
       );
       // Scope CORS to the local proxy origin. The player requests these
-        // in-process; no legitimate cross-origin browser should be hitting
-        // these URLs. Audit B4.
+      // in-process; no legitimate cross-origin browser should be hitting
+      // these URLs. Audit B4.
       request.response.headers.add(
         "Access-Control-Allow-Origin",
         "http://127.0.0.1:$_serverPort",
@@ -622,8 +623,10 @@ class LocalProxyService {
       if (cached != null) {
         prefetcher.onSegmentRequested(targetUrl, _clientFor);
         request.response.statusCode = cached.statusCode;
-        final relabelDisguised =
-            _isDisguisedSegment(targetUrl, cached.statusCode);
+        final relabelDisguised = _isDisguisedSegment(
+          targetUrl,
+          cached.statusCode,
+        );
         cached.headers.forEach((k, v) {
           final lk = k.toLowerCase();
           if (relabelDisguised) {
@@ -846,8 +849,7 @@ class LocalProxyService {
 
         if (relabelDisguised) {
           if (lowerName == 'x-content-type-options') return;
-          if (lowerName == 'content-type' &&
-              values.any(_isTextualType)) {
+          if (lowerName == 'content-type' && values.any(_isTextualType)) {
             request.response.headers.set('content-type', 'video/mp2t');
             return;
           }
@@ -887,8 +889,19 @@ class LocalProxyService {
       }
     } catch (e) {
       if (kDebugMode) debugPrint("LocalProxyService: Proxy Request Error: $e");
-      request.response.statusCode = HttpStatus.badGateway;
-      await request.response.close();
+      // mpv drops connections constantly — every seek, track change and
+      // failover — usually mid-body. By then the headers are gone and changing
+      // the status is a StateError that would bury the error that caused it.
+      try {
+        request.response.statusCode = HttpStatus.badGateway;
+      } on StateError {
+        // Response already started; the status can no longer change.
+      }
+      try {
+        await request.response.close();
+      } catch (_) {
+        // Client hung up; nothing left to say.
+      }
     }
   }
 
@@ -994,12 +1007,17 @@ class LocalProxyService {
         );
         nextReq.followRedirects = false;
 
+        // Credentials only follow a redirect within the same host. A CDN hop
+        // is where a bearer token turns into someone else's bearer token.
+        final sameHost = Uri.parse(nextUrl).host == Uri.parse(currentUrl).host;
+
         // PRESERVE CRITICAL HEADERS
         initialRequest.headers.forEach((name, values) {
           final lowerName = name.toLowerCase();
           if (lowerName != 'host' &&
               lowerName != 'content-length' &&
-              lowerName != 'connection') {
+              lowerName != 'connection' &&
+              (sameHost || lowerName != 'authorization')) {
             for (final v in values) {
               nextReq.headers.add(name, v);
             }
@@ -1138,7 +1156,8 @@ class LocalProxyService {
 
       // Check if this line is a sub-playlist (.m3u8 / .m3u) or an actual media segment
       final lower = trimmed.toLowerCase();
-      final isChildPlaylist = lower.contains('.m3u8') ||
+      final isChildPlaylist =
+          lower.contains('.m3u8') ||
           lower.contains('.m3u') ||
           lower.contains('playlist.php') ||
           lower.contains('play.php');
@@ -1146,7 +1165,11 @@ class LocalProxyService {
       if (!isChildPlaylist) {
         // Segment URL: collect resolved target URL for parallel prefetcher
         try {
-          final target = _resolveSegmentUri(trimmed, baseUrl, options).toString();
+          final target = _resolveSegmentUri(
+            trimmed,
+            baseUrl,
+            options,
+          ).toString();
           segments.add(target);
         } catch (_) {}
       }
@@ -1164,7 +1187,8 @@ class LocalProxyService {
     final rewritten = outputLines.join('\n');
 
     if (segments.isNotEmpty) {
-      final isVod = content.contains('#EXT-X-ENDLIST') ||
+      final isVod =
+          content.contains('#EXT-X-ENDLIST') ||
           !content.contains('#EXT-X-MEDIA-SEQUENCE');
       SegmentPrefetchManager.instance.registerPlaylist(
         playlistUrl: originalUrl,
