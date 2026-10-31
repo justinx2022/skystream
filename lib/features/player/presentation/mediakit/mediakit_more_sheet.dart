@@ -129,7 +129,7 @@ class _MediaKitMoreSheetState extends State<MediaKitMoreSheet> {
                     // that only repeats the row's own label is furniture.
                     const SizedBox(height: 8),
                     PanelRow(
-                      label: 'Quality & Sources',
+                      label: l10n.playerQualityAndSources,
                       detail: widget.quality,
                       icon: Icons.high_quality_rounded,
                       onTap: widget.onSources,

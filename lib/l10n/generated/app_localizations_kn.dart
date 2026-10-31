@@ -1931,4 +1931,13 @@ class AppLocalizationsKn extends AppLocalizations {
 
   @override
   String get selectBufferDuration => 'ಬಫರ್ ಅವಧಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ';
+
+  @override
+  String get playerQualityAndSources => 'ಗುಣಮಟ್ಟ ಮತ್ತು ಮೂಲಗಳು';
+
+  @override
+  String get playerAutoAdaptive => 'ಸ್ವಯಂ (ಹೊಂದಾಣಿಕೆ)';
+
+  @override
+  String get aiNeuralEngine => 'ಎಐ ನ್ಯೂರಲ್ ಎಂಜಿನ್';
 }

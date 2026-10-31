@@ -507,6 +507,9 @@
   "connect": "कनेक्ट करें",
   "debridDisableAndDisconnect": "डेब्रिड अक्षम करें और डिसकनेक्ट करें",
   "debridDisabledAndRemoved": "डेब्रिड अक्षम और हटा दिया गया",
-  "selectBufferDuration": "बफ़र अवधि चुनें"
+  "selectBufferDuration": "बफ़र अवधि चुनें",
+  "playerQualityAndSources": "गुणवत्ता और स्रोत",
+  "playerAutoAdaptive": "स्वतः (अनुकूली)",
+  "aiNeuralEngine": "एआई न्यूरल इंजन"
 }
 

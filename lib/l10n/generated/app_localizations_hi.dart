@@ -1919,4 +1919,13 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get selectBufferDuration => 'बफ़र अवधि चुनें';
+
+  @override
+  String get playerQualityAndSources => 'गुणवत्ता और स्रोत';
+
+  @override
+  String get playerAutoAdaptive => 'स्वतः (अनुकूली)';
+
+  @override
+  String get aiNeuralEngine => 'एआई न्यूरल इंजन';
 }

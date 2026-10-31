@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/utils/layout_constants.dart';
+import '../../../l10n/generated/app_localizations.dart';
 import '../../../../shared/widgets/text_input_dialog.dart';
 import 'ai_settings_provider.dart';
 import 'widgets/settings_widgets.dart';
@@ -14,16 +15,18 @@ class AiSettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final aiAsync = ref.watch(aiSettingsProvider);
+    final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('AI Neural Engine'),
+        title: Text(l10n.aiNeuralEngine),
       ),
       body: aiAsync.when(
         data: (AiSettings settings) => _buildBody(context, ref, settings),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (Object e, StackTrace _) => Center(child: Text('Error: $e')),
+        error: (Object e, StackTrace _) =>
+            Center(child: Text(l10n.errorPrefix('$e'))),
       ),
     );
   }

@@ -1910,4 +1910,13 @@ class AppLocalizationsSv extends AppLocalizations {
 
   @override
   String get selectBufferDuration => 'Select Buffer Duration';
+
+  @override
+  String get playerQualityAndSources => 'Quality & Sources';
+
+  @override
+  String get playerAutoAdaptive => 'Auto (Adaptive)';
+
+  @override
+  String get aiNeuralEngine => 'AI Neural Engine';
 }

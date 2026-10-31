@@ -1706,6 +1706,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (sheetContext) {
+        final l10n = AppLocalizations.of(sheetContext)!;
         return PlayerPanelMetricsScope(
           metrics: PlayerPanelMetrics.forTv(_isTv),
           child: SafeArea(
@@ -1718,7 +1719,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   PlayerSheetHeader(
-                    title: 'Quality & Sources',
+                    title: l10n.playerQualityAndSources,
                     isTv: _isTv,
                   ),
                   Flexible(
@@ -1731,7 +1732,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
                         // 1. Auto (Adaptive)
                         PanelRow(
-                          label: 'Auto (Adaptive)',
+                          label: l10n.playerAutoAdaptive,
                           detail: 'Automatically matches connection speed',
                           badges: const <String>['Adaptive'],
                           icon: Icons.auto_awesome_rounded,
@@ -2314,6 +2315,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// [MediaKitMoreSheet].
   Widget _buildBottomBar() {
     final l10n = AppLocalizations.of(context);
+    final String speedLabel =
+        '${_playbackSpeed == 1.0 ? '1' : _playbackSpeed.toString()}x';
+    final String fitTooltip = '${l10n?.fit ?? 'Fit'}: ${_fitLabel(_fit)}';
     final displayPos = _isDragging && _dragPosition != null
         ? _dragPosition!
         : _position;
@@ -2432,14 +2436,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
               onPressed: _showEpisodesDialog,
             ),
           PlayerActionButton(
-            label: '${_playbackSpeed == 1.0 ? '1' : _playbackSpeed.toString()}x',
+            label: speedLabel,
             icon: Icons.speed_rounded,
             isTv: _isTv,
             onTap: _cyclePlaybackSpeed,
           ),
           PlayerIconButton(
             icon: Icons.aspect_ratio_rounded,
-            tooltip: 'Fit: ${_fitLabel(_fit)}',
+            tooltip: fitTooltip,
             isTv: _isTv,
             onPressed: _cycleFit,
           ),

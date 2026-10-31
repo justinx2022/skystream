@@ -10,7 +10,6 @@ import '../models/addon_manifest.dart';
 import '../models/addon_stream_source.dart';
 import 'addon_client.dart';
 import 'debrid_service.dart';
-import 'direct_hls_service.dart';
 
 part 'addon_stream_service.g.dart';
 
@@ -481,33 +480,6 @@ class AddonStreamService {
 
     final listTrace = PlaybackTrace('addon-list');
     unawaited(() async {
-      final hlsTask = () async {
-        if (_ref != null) {
-          try {
-            final hlsSources = await DirectHlsService().resolveDirectStreams(
-              imdbId: effective.imdbId,
-              type: effective.type,
-              season: effective.season,
-              episode: effective.episode,
-              title: effective.title,
-              cancelToken: cancelToken,
-            );
-            if (hlsSources.isNotEmpty) {
-              for (final s in hlsSources) {
-                if (seen.add(s.dedupeKey)) {
-                  streams.add(s);
-                }
-              }
-              if (!updates.isClosed) updates.add(snapshot());
-            }
-            listTrace.lap('hls', 'links=${hlsSources.length}');
-          } catch (e) {
-            if (kDebugMode) debugPrint('[AddonStreamService] direct HLS error: $e');
-            listTrace.warn('hls', 'failed ${e.runtimeType}');
-          }
-        }
-      }();
-
       // Every stream add-on runs now (up to the cap). Links surface the
       // moment each one answers — the sheet never waits on the slowest
       // host before showing the fast ones.
@@ -524,7 +496,7 @@ class AddonStreamService {
           }
         }),
       );
-      await Future.wait([...workers, hlsTask]);
+      await Future.wait(workers);
       listTrace.lap('done', 'links=${streams.length} addons=${providers.length}');
       if (!updates.isClosed) await updates.close();
     }());

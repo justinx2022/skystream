@@ -507,6 +507,9 @@
   "connect": "ಸಂಪರ್ಕಿಸಿ",
   "debridDisableAndDisconnect": "ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ ಮತ್ತು ಸಂಪರ್ಕ ಕಡಿತಗೊಳಿಸಿ",
   "debridDisabledAndRemoved": "ಡಿಬ್ರಿಡ್ ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ ಮತ್ತು ತೆಗೆದುಹಾಕಲಾಗಿದೆ",
-  "selectBufferDuration": "ಬಫರ್ ಅವಧಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ"
+  "selectBufferDuration": "ಬಫರ್ ಅವಧಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
+  "playerQualityAndSources": "ಗುಣಮಟ್ಟ ಮತ್ತು ಮೂಲಗಳು",
+  "playerAutoAdaptive": "ಸ್ವಯಂ (ಹೊಂದಾಣಿಕೆ)",
+  "aiNeuralEngine": "ಎಐ ನ್ಯೂರಲ್ ಎಂಜಿನ್"
 }
 

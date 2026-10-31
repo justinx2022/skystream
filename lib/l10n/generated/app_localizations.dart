@@ -3500,6 +3500,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Select Buffer Duration'**
   String get selectBufferDuration;
+
+  /// Player sheet header and the options row that opens the quality and source picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality & Sources'**
+  String get playerQualityAndSources;
+
+  /// Quality option in the player that follows the connection; the engine picks the rendition.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto (Adaptive)'**
+  String get playerAutoAdaptive;
+
+  /// Title of the AI settings screen. 'Neural Engine' is the feature's own name.
+  ///
+  /// In en, this message translates to:
+  /// **'AI Neural Engine'**
+  String get aiNeuralEngine;
 }
 
 class _AppLocalizationsDelegate

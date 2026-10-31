@@ -204,8 +204,15 @@ class LocalProxyService {
     final scheme = uri.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') return false;
     if (uri.host.isEmpty) return false;
-    // Reject recursive proxy loop to loopback
-    if (uri.host == '127.0.0.1' || uri.host == 'localhost') return false;
+    // Reject the recursive proxy loop — a target that resolves back to this
+    // proxy. Other loopback hosts stay valid: a loopback origin is a real
+    // upstream, and only this proxy's own port closes the loop.
+    final isLoopbackHost =
+        uri.host == '127.0.0.1' ||
+        uri.host == 'localhost' ||
+        uri.host == '::1' ||
+        uri.host == '[::1]';
+    if (isLoopbackHost && uri.port == _serverPort) return false;
     return true;
   }
 

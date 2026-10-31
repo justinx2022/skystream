@@ -1356,6 +1356,18 @@
   "selectBufferDuration": "Select Buffer Duration",
   "@selectBufferDuration": {
     "description": "Title of the dialog that picks how many minutes the player buffers ahead."
+  },
+  "playerQualityAndSources": "Quality & Sources",
+  "@playerQualityAndSources": {
+    "description": "Player sheet header and the options row that opens the quality and source picker."
+  },
+  "playerAutoAdaptive": "Auto (Adaptive)",
+  "@playerAutoAdaptive": {
+    "description": "Quality option in the player that follows the connection; the engine picks the rendition."
+  },
+  "aiNeuralEngine": "AI Neural Engine",
+  "@aiNeuralEngine": {
+    "description": "Title of the AI settings screen. 'Neural Engine' is the feature's own name."
   }
 }
 

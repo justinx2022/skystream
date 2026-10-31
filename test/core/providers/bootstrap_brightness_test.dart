@@ -15,9 +15,13 @@
 /// `setAutoReset(false)` is the cheap half of the fix: it stops every
 /// per-activation probe and the pause-time write. It does not stop the
 /// constructor's first probe — only keeping the plugin off the desktop build
-/// does that. Mobile keeps auto-reset ON, where restoring system brightness
-/// when the app leaves the foreground is the behaviour a user wants.
+/// does that, which is why Windows now runs the stub in
+/// `packages/screen_brightness_windows`. Mobile keeps auto-reset ON, where
+/// restoring system brightness when the app leaves the foreground is the
+/// behaviour a user wants.
 library;
+
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,13 +61,19 @@ void main() {
       .map((c) => (c.arguments as Map<Object?, Object?>)['isAutoReset'] as bool)
       .toList();
 
-  test('a desktop launch switches auto-reset off', () async {
-    // The host running these tests is a desktop, which is the case under test.
+  /// Whether this host has a brightness implementation to quiet.
+  ///
+  /// Windows runs the vendored stub in `packages/screen_brightness_windows`
+  /// (no channel handler), Linux has no implementation at all, so macOS is the
+  /// only desktop where the call has anything to talk to.
+  final bool expectsCall = Platform.isMacOS;
+
+  test('a desktop launch switches auto-reset off where the plugin exists', () async {
     await quietDesktopBrightness();
 
     expect(
       autoResetArgs(),
-      [false],
+      expectsCall ? <bool>[false] : <bool>[],
       reason:
           'with auto-reset on, every activation and every close issues DDC/CI '
           'to the monitor for a feature the desktop cannot reach',
@@ -76,7 +86,7 @@ void main() {
 
     expect(
       autoResetArgs().length,
-      1,
+      expectsCall ? 1 : 0,
       reason: 'the second call is a no-op; the flag is already off',
     );
   });
@@ -86,7 +96,7 @@ void main() {
 
     expect(
       brightnessCalls.map((c) => c.method).toSet(),
-      {'setAutoReset'},
+      expectsCall ? <String>{'setAutoReset'} : <String>{},
       reason:
           'reading or setting brightness here would be the very traffic this '
           'is removing',
