@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:collection/collection.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -72,7 +73,8 @@ class MediaKitPlayerScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<MediaKitPlayerScreen> createState() => _MediaKitPlayerScreenState();
+  ConsumerState<MediaKitPlayerScreen> createState() =>
+      _MediaKitPlayerScreenState();
 }
 
 class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
@@ -119,6 +121,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// is retried once through the proxy, never in a loop.
   bool _attemptTriedProxy = false;
 
+  /// Whether the current source has already been reopened *without* the proxy
+  /// after a silent open. The pair gives each source one turn on each path:
+  /// a proxied open that never draws gets the direct URL, and vice versa.
+  bool _attemptTriedDirect = false;
+
   /// The leash the current attempt was given, kept so the record made when it
   /// runs out can say how long the wait was.
   Duration _attemptWatchdogWait = _kSilentOpenWatchdog;
@@ -142,6 +149,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// went without a debugger attached.
   PlaybackTrace? _trace;
 
+  /// The engine's own last words, kept for the silent-open report.
+  ///
+  /// mpv writes its diagnostics to the debug console, which a shipped build
+  /// does not keep. A source that opens and never draws leaves no other trace,
+  /// so the tail is dumped into the app log at the moment the watchdog fires -
+  /// the one place a viewer can read it (`/logs`).
+  final List<String> _mpvLogTail = <String>[];
+
   /// The subtitle files of what is playing - the source's and any the viewer
   /// added - which SkyStream draws over the picture rather than handing to
   /// mpv. See [SideCarSubtitles].
@@ -155,15 +170,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   /// The tracks inside the video, mirrored for the sheet. media_kit owns both
   /// the list and the selection; these only echo what it last said.
-  final ValueNotifier<List<SubtitleTrack>> _embeddedSubtitles =
-      ValueNotifier(const <SubtitleTrack>[]);
+  final ValueNotifier<List<SubtitleTrack>> _embeddedSubtitles = ValueNotifier(
+    const <SubtitleTrack>[],
+  );
   final ValueNotifier<String?> _activeEmbeddedSubtitle = ValueNotifier(null);
 
   /// The video tracks inside the media (e.g. HLS renditions), mirrored for manual quality choice.
-  final ValueNotifier<List<VideoTrack>> _videoTracks =
-      ValueNotifier(const <VideoTrack>[]);
-  final ValueNotifier<VideoTrack?> _currentVideoTrack =
-      ValueNotifier(null);
+  final ValueNotifier<List<VideoTrack>> _videoTracks = ValueNotifier(
+    const <VideoTrack>[],
+  );
+  final ValueNotifier<VideoTrack?> _currentVideoTrack = ValueNotifier(null);
 
   /// Manual quality override chosen by the viewer (e.g. '1080p', '720p', 'Auto')
   String? _manualQualitySelection;
@@ -191,12 +207,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   PlayerSettings? _settings;
 
   static BoxFit _fitFromSettings(String mode) => switch (mode.toLowerCase()) {
-        'zoom' => BoxFit.cover,
-        'stretch' => BoxFit.fill,
-        _ => BoxFit.contain,
-      };
+    'zoom' => BoxFit.cover,
+    'stretch' => BoxFit.fill,
+    _ => BoxFit.contain,
+  };
 
   int get _seekStep => _settings?.seekDuration ?? 10;
+
   /// How this device is driven, derived per build from the device profile -
   /// a television is handed the ten-foot ramp and a wrapped action row, and
   /// everything else the two-line bar a pointer can drag. [unknown] until the
@@ -247,10 +264,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     }
 
     _item = widget.item;
-    if ((_item.episodes == null || _item.episodes!.isEmpty) && widget.item.url.isNotEmpty) {
+    if ((_item.episodes == null || _item.episodes!.isEmpty) &&
+        widget.item.url.isNotEmpty) {
       try {
-        final cached = _read(detailsControllerProvider(widget.item.url)).details.asData?.value;
-        if (cached != null && cached.episodes != null && cached.episodes!.isNotEmpty) {
+        final cached = _read(detailsControllerProvider(widget.item.url))
+            .details
+            .asData
+            ?.value;
+        if (cached != null &&
+            cached.episodes != null &&
+            cached.episodes!.isNotEmpty) {
           _item = cached;
         }
       } catch (_) {}
@@ -259,7 +282,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _currentVideoUrl = widget.videoUrl;
     _settings = _read(playerSettingsProvider).asData?.value;
     _fit = _fitFromSettings(_settings?.defaultResizeMode ?? 'Fit');
-    _currentEpisode = widget.episode ??
+    _currentEpisode =
+        widget.episode ??
         _item.episodes?.firstWhereOrNull((e) {
           final u1 = e.url.trim().replaceAll(RegExp(r'/+$'), '');
           final u2 = widget.videoUrl.trim().replaceAll(RegExp(r'/+$'), '');
@@ -270,7 +294,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       configuration: PlayerConfiguration(
         title: 'SkyStream',
         bufferSize: _bufferPlan().megabytes * 1024 * 1024,
-        logLevel: MPVLogLevel.error,
+        // `info`, not `error`: a source that opens and then draws nothing
+        // usually has no error to report, only messages about what it was
+        // waiting on. They are kept in [_mpvLogTail] and surfaced in-app when
+        // the startup watchdog fires.
+        logLevel: MPVLogLevel.info,
       ),
     );
 
@@ -323,10 +351,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// the VLC engine resolve it, so the number shown and the number used are
   /// the same one.
   ({int megabytes, int seconds}) _bufferPlan() {
-    final settings =
-        _read(playerSettingsProvider).asData?.value ?? _settings;
-    final tier = _read(deviceProfileProvider).asData?.value.tier ??
-        DeviceTier.standard;
+    final settings = _read(playerSettingsProvider).asData?.value ?? _settings;
+    final tier =
+        _read(deviceProfileProvider).asData?.value.tier ?? DeviceTier.standard;
     return (
       megabytes: resolveNetworkBufferMb(
         settings?.networkBufferMb,
@@ -346,7 +373,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('hwdec', 'mediacodec');
           await native.setProperty('scale', 'bilinear');
           await native.setProperty('cscale', 'bilinear');
-          await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
+          await native.setProperty(
+            'framedrop',
+            'yes',
+          ); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
           await native.setProperty('cache-pause-wait', '0.5');
@@ -355,7 +385,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
-          await native.setProperty('stream-lavf-o', 'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2');
+          await native.setProperty(
+            'stream-lavf-o',
+            'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2',
+          );
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         } else if (!kIsWeb && Platform.isWindows) {
           await native.setProperty('hwdec', 'auto-safe');
@@ -387,7 +420,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('network-timeout', '10');
 
           // Treat localhost as local (disable network buffering logic)
-          await native.setProperty('stream-lavf-o', 'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2');
+          await native.setProperty(
+            'stream-lavf-o',
+            'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2',
+          );
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         }
 
@@ -424,20 +460,27 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             await native.setProperty('af', af);
           }
           // 2. HDR10 to SDR Tone Mapping
-          for (final entry in NeuralMediaEnhancer.buildToneMappingOptions(aiSettings).entries) {
+          for (final entry in NeuralMediaEnhancer.buildToneMappingOptions(
+            aiSettings,
+          ).entries) {
             await native.setProperty(entry.key, entry.value);
           }
           // 3. Anti-Banding & Gradient Smoothing
-          for (final entry in NeuralMediaEnhancer.buildAntiBandingOptions(aiSettings).entries) {
+          for (final entry in NeuralMediaEnhancer.buildAntiBandingOptions(
+            aiSettings,
+          ).entries) {
             await native.setProperty(entry.key, entry.value);
           }
           // 4. Dynamic Demuxer & Instant Seek
-          for (final entry in NeuralMediaEnhancer.buildDemuxerTuningOptions(aiSettings).entries) {
+          for (final entry in NeuralMediaEnhancer.buildDemuxerTuningOptions(
+            aiSettings,
+          ).entries) {
             await native.setProperty(entry.key, entry.value);
           }
         }
       } catch (e) {
-        if (kDebugMode) debugPrint('[MediaKit] Error configuring mpv properties: $e');
+        if (kDebugMode)
+          debugPrint('[MediaKit] Error configuring mpv properties: $e');
       }
     }
   }
@@ -449,10 +492,12 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (settings == null) return;
     final scale = (settings.subtitleSize / 22).clamp(0.5, 3.0);
     await native.setProperty('sub-scale', scale.toStringAsFixed(2));
-    await native.setProperty('sub-color', _mpvColor(Color(settings.subtitleColor)));
-    final background = Color(settings.subtitleBackgroundColor).withValues(
-      alpha: settings.subtitleBackgroundOpacity.clamp(0.0, 1.0),
+    await native.setProperty(
+      'sub-color',
+      _mpvColor(Color(settings.subtitleColor)),
     );
+    final background = Color(settings.subtitleBackgroundColor)
+        .withValues(alpha: settings.subtitleBackgroundOpacity.clamp(0.0, 1.0));
     await native.setProperty('sub-back-color', _mpvColor(background));
   }
 
@@ -464,12 +509,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     final episodes = _item.episodes ?? widget.item.episodes;
     if (episodes == null || episodes.isEmpty) return null;
     final cleanVideo = _currentVideoUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    final cleanWidgetVideo = widget.videoUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final cleanWidgetVideo = widget.videoUrl.trim().replaceAll(
+      RegExp(r'/+$'),
+      '',
+    );
     return episodes.firstWhereOrNull((e) {
       final cleanE = e.url.trim().replaceAll(RegExp(r'/+$'), '');
       return e.url == _currentVideoUrl ||
           e.url == widget.videoUrl ||
-          (cleanE.isNotEmpty && (cleanE == cleanVideo || cleanE == cleanWidgetVideo));
+          (cleanE.isNotEmpty &&
+              (cleanE == cleanVideo || cleanE == cleanWidgetVideo));
     });
   }
 
@@ -535,6 +584,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _attemptReachedPicture = false;
     _attemptProviderId = '';
     _attemptTriedProxy = false;
+    _attemptTriedDirect = false;
     _trackSettlingUntil = null;
     _openToken++;
     // A file the viewer added belonged to the last episode as much as the
@@ -695,10 +745,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             !_subtitlesOffPending &&
             list.isNotEmpty) {
           final prefCode = _read(subtitleLanguageProvider);
-          final preferred = preferredSubtitleIndex(
-            [for (final t in list) t.language ?? t.title ?? ''],
-            prefCode,
-          );
+          final preferred = preferredSubtitleIndex([
+            for (final t in list) t.language ?? t.title ?? '',
+          ], prefCode);
           if (preferred != null && preferred < list.length) {
             unawaited(_player.setSubtitleTrack(list[preferred]));
           }
@@ -710,10 +759,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _player.stream.track.listen((track) {
         if (_disposed) return;
         final subtitle = track.subtitle;
-        _activeEmbeddedSubtitle.value = subtitle.id == 'no' ||
-                subtitle.id == 'auto'
-            ? null
-            : subtitle.id;
+        _activeEmbeddedSubtitle.value =
+            subtitle.id == 'no' || subtitle.id == 'auto' ? null : subtitle.id;
         _currentVideoTrack.value = track.video;
         _applySubtitleDefault(subtitle.id);
       }),
@@ -728,7 +775,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         if (isBuffering && _isSettlingTrackChange) return;
         setState(() => _isBuffering = isBuffering);
 
-        if (isBuffering && _attemptReachedPicture && !_isLoading && !_isSwitching) {
+        if (isBuffering &&
+            _attemptReachedPicture &&
+            !_isLoading &&
+            !_isSwitching) {
           _midstreamStallWatchdog?.cancel();
           _midstreamStallWatchdog = Timer(const Duration(milliseconds: 4500), () {
             if (_disposed || !mounted) return;
@@ -763,6 +813,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     );
 
     _subscriptions.add(
+      _player.stream.log.listen((line) {
+        if (_disposed) return;
+        final text = line.text.trim();
+        if (text.isEmpty) return;
+        _rememberMpvLine('${line.level}|${line.prefix}|$text');
+      }),
+    );
+
+    _subscriptions.add(
       _player.stream.error.listen((err) {
         if (_disposed || !mounted) return;
         if (kDebugMode) debugPrint('[MediaKit] Player Error: $err');
@@ -770,6 +829,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // alone says nothing about whether the link 404'd or the decoder
         // refused the codec.
         _lastEngineError = err.trim();
+        _trace?.warn('engine-error', _lastEngineError);
         // libmpv reports an error while it rebuilds the demuxer for a track
         // change. Failing over on that is what made track switching reload
         // the whole link.
@@ -824,9 +884,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// The wait depends on what was opened - a progressive file gets the longer
   /// leash, a playlist the shorter one - because the two fail in different
   /// shapes (see [_kSilentOpenWatchdogHls]). Either way the source gets one
-  /// turn through the proxy first (see [_recoverFromSilentOpen]), and the
-  /// last candidate is left alone after that: a list that is slow everywhere
-  /// still deserves its chance.
+  /// turn on each open path before it is abandoned (see
+  /// [_recoverFromSilentOpen]).
   void _armStartupWatchdog(int token) {
     _startupWatchdog?.cancel();
     _attemptOpenedAt = DateTime.now();
@@ -837,10 +896,102 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
       _trace?.warn(
         'no-picture',
         'watchdog-${wait.inSeconds}s attempt=$_attemptIndex '
-            'proxy-tried=$_attemptTriedProxy',
+            'proxy-tried=$_attemptTriedProxy direct-tried=$_attemptTriedDirect',
       );
       unawaited(_recoverFromSilentOpen(token));
     });
+  }
+
+  void _rememberMpvLine(String line) {
+    _mpvLogTail.add(line);
+    if (_mpvLogTail.length > 24) {
+      _mpvLogTail.removeAt(0);
+    }
+  }
+
+  /// Writes what the engine was waiting on into the app log.
+  ///
+  /// A silent open is the one failure with no error to report: mpv accepted
+  /// the URL and then either never fetched, fetched and refused to demux, or
+  /// reached the end. Those three look identical from the outside and each
+  /// asks for a different fix, so the properties that tell them apart - plus
+  /// the engine's own last messages and what the proxy did for this source -
+  /// go into `/logs` before anything is retried.
+  Future<void> _describeSilentOpen() async {
+    if (_player.platform is! NativePlayer) return;
+    final native = _player.platform as NativePlayer;
+    const keys = <String>[
+      'idle-active',
+      'core-idle',
+      'eof-reached',
+      'paused',
+      'paused-for-cache',
+      'cache-buffering-state',
+      'cache-speed',
+      'demuxer-cache-duration',
+      'demuxer-cache-idle',
+      'video-format',
+      'audio-format',
+      'width',
+      'height',
+      'time-pos',
+    ];
+    final parts = <String>[];
+    for (final key in keys) {
+      try {
+        final value = await native.getProperty(
+          key,
+          waitForInitialization: false,
+        );
+        parts.add('$key=$value');
+      } catch (_) {}
+    }
+    if (parts.isNotEmpty) _trace?.warn('engine-state', parts.join(' '));
+    final tail = _mpvLogTail.length > 12
+        ? _mpvLogTail.sublist(_mpvLogTail.length - 12)
+        : _mpvLogTail;
+    for (final line in tail) {
+      _trace?.warn('mpv', line);
+    }
+    final proxied = LocalProxyService.recentEvents;
+    if (proxied.isNotEmpty) _trace?.warn('proxy', proxied.join(' ; '));
+  }
+
+  /// What to do about a source that opened and never drew.
+  ///
+  /// Each source gets one turn on each open path before it is abandoned. A
+  /// direct open that never drew is retried through the local proxy, whose
+  /// relabelled bodies and rewritten playlist are what some chunk CDNs need; a
+  /// proxied open that never drew is retried on the engine's own HTTP stack,
+  /// because the proxy is also an extra hop, a header rewrite and a DNS answer,
+  /// and any of the three can be the reason the picture never came.
+  Future<void> _recoverFromSilentOpen(int token) async {
+    final streams = _resolved?.streams ?? _candidates;
+    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
+    final stream = streams[_attemptIndex];
+    final at = _attemptStartAt > Duration.zero ? _attemptStartAt : null;
+    final url = AppUtils.normalizeUrl(stream.url);
+    final headers = playbackHeaders(stream);
+
+    await _describeSilentOpen();
+    if (_disposed || !mounted || token != _openToken) return;
+
+    if (!_attemptTriedProxy) {
+      if (await _tryProxyFallback(url, headers, at, token)) return;
+    } else if (!_attemptTriedDirect) {
+      if (await _tryDirectOpen(url, headers, at, token)) return;
+    }
+    if (_disposed || !mounted || token != _openToken) return;
+
+    // The last source gets the same two turns, and then the viewer is told
+    // what happened instead of being left on a spinner that never answers.
+    final reason =
+        'no picture within ${_attemptWatchdogWait.inSeconds} seconds';
+    _recordProviderHealth(success: false, reason: reason);
+    if (_attemptIndex + 1 >= streams.length) {
+      _lastEngineError = reason;
+    }
+    _failoverNext();
   }
 
   /// Which leash the source on screen has earned.
@@ -859,37 +1010,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         : _kSilentOpenWatchdog;
   }
 
-  /// What to do about a source that opened and never drew.
-  ///
-  /// A chunk CDN that answers with `text/html` and `nosniff` opens in mpv
-  /// without an error and then never demuxes; the local proxy is the one path
-  /// that relabels those bodies, and nothing before this point has tried it -
-  /// the native open succeeds, so the exception fallback never runs. The proxy
-  /// gets one turn per source; if the picture still does not come, the source
-  /// is abandoned like any other.
-  Future<void> _recoverFromSilentOpen(int token) async {
-    final streams = _resolved?.streams ?? _candidates;
-    if (_attemptIndex < 0 || _attemptIndex >= streams.length) return;
-    if (!_attemptTriedProxy) {
-      final stream = streams[_attemptIndex];
-      final at = _attemptStartAt > Duration.zero ? _attemptStartAt : null;
-      final reopened = await _tryProxyFallback(
-        AppUtils.normalizeUrl(stream.url),
-        playbackHeaders(stream),
-        at,
-        token,
-      );
-      if (reopened) return;
-      if (_disposed || !mounted || token != _openToken) return;
-    }
-    if (_attemptIndex + 1 >= streams.length) return;
-    _recordProviderHealth(
-      success: false,
-      reason: 'no picture within ${_attemptWatchdogWait.inSeconds} seconds',
-    );
-    _failoverNext();
-  }
-
   /// Feeds the source-selection ranking what actually happened. Elapsed time
   /// here is time to first picture, which is the number a viewer feels - not
   /// how quickly the add-on listed the link.
@@ -902,7 +1022,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (id.isEmpty) return;
     final enabled =
         _read(playerSettingsProvider).asData?.value.autoHealthScoringEnabled ??
-            true;
+        true;
     if (!enabled) return;
     try {
       final health = _read(providerHealthServiceProvider);
@@ -924,7 +1044,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (bufferedEnd < _position) {
       bufferedEnd = _position;
     }
-    return (bufferedEnd.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
+    return (bufferedEnd.inMilliseconds / _duration.inMilliseconds).clamp(
+      0.0,
+      1.0,
+    );
   }
 
   Future<void> _startPlayback() async {
@@ -967,7 +1090,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         videoUrl: _currentVideoUrl,
         preloadedStreams: _currentVideoUrl == widget.videoUrl
             ? (widget.preloadedStreams ??
-                StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams)
+                  StreamPrewarmer.instance
+                      .getPrewarmed(_currentVideoUrl)
+                      ?.streams)
             : StreamPrewarmer.instance.getPrewarmed(_currentVideoUrl)?.streams,
         // A tapped row opens at once - its check runs behind the open and only
         // steers failover. An auto-picked list is speed-raced instead, so a
@@ -978,11 +1103,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         // and failover still covers one that turns out dead.
         // When AI Intent Pre-Fetch is active, bypass the 1.6s speed probe delay
         // to achieve instant time-to-first-frame handshake.
-        probeCandidates: (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+        probeCandidates:
+            (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
                 _read(aiSettingsProvider).asData?.value.intentPreFetch == true)
             ? 1
             : (await isOnMeteredNetwork() ? 1 : kSpeedProbeCandidates),
-        probeBudget: (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
+        probeBudget:
+            (_read(aiSettingsProvider).asData?.value.aiEnabled == true &&
                 _read(aiSettingsProvider).asData?.value.intentPreFetch == true)
             ? const Duration(milliseconds: 250)
             : kSpeedProbeBudget,
@@ -1041,7 +1168,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   /// tapped, and only one that left the check waiting was replaced by a
   /// quicker mirror. A URL the engine rejects gets one retry through the
   /// local proxy before failover.
-  Future<void> _openCandidate(int index, {Duration startAt = Duration.zero}) async {
+  Future<void> _openCandidate(
+    int index, {
+    Duration startAt = Duration.zero,
+  }) async {
     final streams = _resolved?.streams ?? _candidates;
     if (streams.isEmpty) return;
     if (index < 0 || index >= streams.length) {
@@ -1094,6 +1224,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _attemptStartAt = at ?? Duration.zero;
     _attemptReachedPicture = false;
     _attemptTriedProxy = false;
+    _attemptTriedDirect = false;
     _attemptProviderId = providerIdForStream(
       stream,
       fallback: _item.provider ?? '',
@@ -1106,8 +1237,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
     try {
       final bool isAlreadyProxied =
-          url.startsWith('http://127.0.0.1:') || url.startsWith('http://localhost:');
-      final bool shouldRouteThroughShield = !isAlreadyProxied &&
+          url.startsWith('http://127.0.0.1:') ||
+          url.startsWith('http://localhost:');
+      final bool shouldRouteThroughShield =
+          !isAlreadyProxied &&
           (headers.isNotEmpty ||
               url.toLowerCase().contains('.m3u8') ||
               url.toLowerCase().contains('.mpd'));
@@ -1117,10 +1250,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
       if (shouldRouteThroughShield) {
         await LocalProxyService.instance.startServer();
-        playUrl = LocalProxyService.instance.getProxyUrl(
-          url,
-          headers: headers,
-        );
+        playUrl = LocalProxyService.instance.getProxyUrl(url, headers: headers);
         _attemptTriedProxy = true;
         playHeaders = const {'X-Local-Proxy': '1'};
         if (_player.platform is NativePlayer) {
@@ -1142,7 +1272,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         await native.setProperty('http-header-fields', extraFields.join(','));
       }
 
-      await _player.open(Media(playUrl, httpHeaders: playHeaders, start: at), play: true);
+      await _player.open(
+        Media(playUrl, httpHeaders: playHeaders, start: at),
+        play: true,
+      );
       if (_disposed || !mounted || token != _openToken) return;
       _armStartupWatchdog(token);
       setState(() {
@@ -1173,7 +1306,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   ) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.scheme.startsWith('http')) return false;
-    if (uri.host == '127.0.0.1' || uri.host == 'localhost' || _attemptTriedProxy) {
+    if (uri.host == '127.0.0.1' ||
+        uri.host == 'localhost' ||
+        _attemptTriedProxy) {
       return false;
     }
     _attemptTriedProxy = true;
@@ -1206,6 +1341,64 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     } catch (e) {
       if (kDebugMode) debugPrint('[MediaKit] Proxy fallback failed: $e');
       _trace?.warn('proxy-retry', 'failed ${e.runtimeType}');
+      return false;
+    }
+  }
+
+  /// Retries a source that was opened through the proxy directly on the
+  /// engine's own HTTP stack.
+  ///
+  /// The direct path is the control for a silent proxied open: it removes the
+  /// local listener, the URL rewrite, the header sanitiser and the DoH answer
+  /// in one step, so a source that plays this way was failed by the proxy and
+  /// one that does not was failed by itself. The source's own headers still go
+  /// with it, since some mirrors refuse a bare request.
+  Future<bool> _tryDirectOpen(
+    String url,
+    Map<String, String> headers,
+    Duration? at,
+    int token,
+  ) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.scheme.startsWith('http')) return false;
+    if (uri.host == '127.0.0.1' ||
+        uri.host == 'localhost' ||
+        _attemptTriedDirect) {
+      return false;
+    }
+    _attemptTriedDirect = true;
+    try {
+      if (_player.platform is NativePlayer) {
+        final native = _player.platform as NativePlayer;
+        final referer = headers['Referer'] ?? headers['referer'];
+        await native.setProperty('referer', referer ?? '');
+        final extraFields = <String>[];
+        headers.forEach((k, v) {
+          final lk = k.toLowerCase();
+          if (lk != 'referer' && lk != 'user-agent') {
+            extraFields.add('$k: $v');
+          }
+        });
+        await native.setProperty('http-header-fields', extraFields.join(','));
+      }
+      await _player.open(
+        Media(url, httpHeaders: headers, start: at),
+        play: true,
+      );
+      if (_disposed || !mounted || token != _openToken) return true;
+      _trace?.lap('direct-retry', 'reopened attempt=$_attemptIndex');
+      _armStartupWatchdog(token);
+      setState(() {
+        if (_player.state.playing) {
+          _isLoading = false;
+          _isSwitching = false;
+          _hasPlayedOnce = true;
+        }
+      });
+      return true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('[MediaKit] Direct fallback failed: $e');
+      _trace?.warn('direct-retry', 'failed ${e.runtimeType}');
       return false;
     }
   }
@@ -1316,14 +1509,16 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   Future<void> _toggleFullscreen() async {
     _onUserActivity();
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       final isFull = await windowManager.isFullScreen();
       await windowManager.setFullScreen(!isFull);
       if (mounted) {
         setState(() => _isFullscreen = !isFull);
       }
     } else if (!kIsWeb && Platform.isAndroid) {
-      final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+      final isLandscape =
+          MediaQuery.of(context).orientation == Orientation.landscape;
       if (isLandscape) {
         await SystemChrome.setPreferredOrientations([
           DeviceOrientation.portraitUp,
@@ -1343,7 +1538,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (fit == _fit) return;
     setState(() => _fit = fit);
   }
-
 
   /// Replaces the source's subtitle files for the media that has just been
   /// opened, and puts one on under Auto: the file the viewer was reading
@@ -1382,15 +1576,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _viewerChoseSubtitle = false;
     _subtitleOffAsked = null;
     final settings =
-        _read(playerSettingsProvider).asData?.value ??
-        const PlayerSettings();
+        _read(playerSettingsProvider).asData?.value ?? const PlayerSettings();
     _subtitlesOffPending = settings.subtitleDefault == SubtitleDefault.off;
     if (_subtitlesOffPending || _sideCars.active != null) return;
 
-    final preferred = preferredSubtitleIndex(
-      [for (final track in tracks) track.languageCode],
-      _read(subtitleLanguageProvider),
-    );
+    final preferred = preferredSubtitleIndex([
+      for (final track in tracks) track.languageCode,
+    ], _read(subtitleLanguageProvider));
     if (preferred != null) {
       unawaited(_sideCars.select(tracks[preferred], from: startAt));
     }
@@ -1442,9 +1634,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     if (l10n == null) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(l10n.failedToLoadSubtitles)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(l10n.failedToLoadSubtitles)));
   }
 
   Uri? _playableSubtitleUri(String value) {
@@ -1548,8 +1739,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         isTv: _isTv,
         onOff: _turnSubtitlesOff,
         onEmbedded: _selectEmbeddedSubtitle,
-        onSideCar: (file) =>
-            unawaited(_sideCars.select(file, from: _position)),
+        onSideCar: (file) => unawaited(_sideCars.select(file, from: _position)),
         onDelay: _setSubtitleDelay,
         onLoadFile: () => unawaited(_loadSubtitleFile()),
         onSearch: () => unawaited(_openSubtitleSearch()),
@@ -1606,11 +1796,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     _subtitlesOffPending = false;
     try {
       await _player.setSubtitleTrack(
-        SubtitleTrack.uri(
-          file.toString(),
-          title: label,
-          language: language,
-        ),
+        SubtitleTrack.uri(file.toString(), title: label, language: language),
       );
     } catch (_) {}
     final track = _sideCars.addViewerTrack(
@@ -1656,14 +1842,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
   /// The badge the control bar shows for what is playing.
   String get _currentQualityLabel {
-    if (_manualQualitySelection != null &&
-        _manualQualitySelection != 'Auto') {
+    if (_manualQualitySelection != null && _manualQualitySelection != 'Auto') {
       return _manualQualitySelection!;
     }
     final activeVideo = _currentVideoTrack.value;
-    if (activeVideo != null &&
-        activeVideo.h != null &&
-        activeVideo.h! > 0) {
+    if (activeVideo != null && activeVideo.h != null && activeVideo.h! > 0) {
       final h = activeVideo.h!;
       if (h >= 1800) return '4K';
       if (h >= 1260) return '2K';
@@ -1736,7 +1919,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                           detail: 'Automatically matches connection speed',
                           badges: const <String>['Adaptive'],
                           icon: Icons.auto_awesome_rounded,
-                          selected: _manualQualitySelection == null ||
+                          selected:
+                              _manualQualitySelection == null ||
                               _manualQualitySelection == 'Auto',
                           selectedLabel: 'Active',
                           onTap: () {
@@ -1771,8 +1955,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                               selectedLabel: 'Selected',
                               onTap: () {
                                 setState(() {
-                                  _manualQualitySelection =
-                                      track.h != null ? '${track.h}p' : track.id;
+                                  _manualQualitySelection = track.h != null
+                                      ? '${track.h}p'
+                                      : track.id;
                                 });
                                 unawaited(_player.setVideoTrack(track));
                                 Navigator.of(sheetContext).maybePop();
@@ -1785,7 +1970,11 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                           (QualityTier.q4k, '4K Ultra HD', '4K'),
                           (QualityTier.q1080, '1080p Full HD', '1080p'),
                           (QualityTier.q720, '720p High Definition', '720p'),
-                          (QualityTier.q480, '480p Standard Definition', '480p'),
+                          (
+                            QualityTier.q480,
+                            '480p Standard Definition',
+                            '480p',
+                          ),
                           (QualityTier.q360, '360p Data Saver', '360p'),
                         ]) ...[
                           () {
@@ -1806,13 +1995,14 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                                 )
                                 .toList();
 
-                            final isAvailable = matchingTrack != null ||
+                            final isAvailable =
+                                matchingTrack != null ||
                                 matchingCandidates.isNotEmpty;
                             final isCurrentlyActive =
                                 _currentQualityLabel == badge ||
-                                    (activeTrack != null &&
-                                        activeTrack.h != null &&
-                                        tierForHeight(activeTrack.h!) == tier);
+                                (activeTrack != null &&
+                                    activeTrack.h != null &&
+                                    tierForHeight(activeTrack.h!) == tier);
 
                             if (!isAvailable && videoTracks.isNotEmpty) {
                               return const SizedBox.shrink();
@@ -1822,8 +2012,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                               label: title,
                               detail: isAvailable
                                   ? (matchingTrack != null
-                                      ? 'Stream video track'
-                                      : '${matchingCandidates.length} server mirror${matchingCandidates.length > 1 ? 's' : ''}')
+                                        ? 'Stream video track'
+                                        : '${matchingCandidates.length} server mirror${matchingCandidates.length > 1 ? 's' : ''}')
                                   : 'No server reported this exact resolution',
                               badges: <String>[badge],
                               icon: Icons.high_quality_rounded,
@@ -1837,7 +2027,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                                 Navigator.of(sheetContext).maybePop();
 
                                 if (matchingTrack != null) {
-                                  unawaited(_player.setVideoTrack(matchingTrack));
+                                  unawaited(
+                                    _player.setVideoTrack(matchingTrack),
+                                  );
                                 } else if (matchingCandidates.isNotEmpty) {
                                   final bestIndex =
                                       matchingCandidates.first.key;
@@ -1858,8 +2050,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
                         if (streams.isEmpty)
                           const PanelEmpty(
-                            text:
-                                'No other sources were found for this title.',
+                            text: 'No other sources were found for this title.',
                           )
                         else
                           for (final (index, stream) in streams.indexed)
@@ -1918,11 +2109,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         ]);
       } catch (_) {}
     }
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       try {
-        windowManager.isFullScreen().then((isFull) {
-          if (isFull) windowManager.setFullScreen(false);
-        }).catchError((_) {});
+        windowManager
+            .isFullScreen()
+            .then((isFull) {
+              if (isFull) windowManager.setFullScreen(false);
+            })
+            .catchError((_) {});
       } catch (_) {}
     }
   }
@@ -1954,17 +2149,20 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     try {
       _recordFinalProgress();
     } catch (e, st) {
-      if (kDebugMode) debugPrint('Error during _recordFinalProgress in dispose: $e\n$st');
+      if (kDebugMode)
+        debugPrint('Error during _recordFinalProgress in dispose: $e\n$st');
     }
     try {
       _tracker?.finish();
     } catch (e, st) {
-      if (kDebugMode) debugPrint('Error during _tracker.finish in dispose: $e\n$st');
+      if (kDebugMode)
+        debugPrint('Error during _tracker.finish in dispose: $e\n$st');
     }
     try {
       _cleanupPlatformOnExit();
     } catch (e, st) {
-      if (kDebugMode) debugPrint('Error during _cleanupPlatformOnExit in dispose: $e\n$st');
+      if (kDebugMode)
+        debugPrint('Error during _cleanupPlatformOnExit in dispose: $e\n$st');
     }
     try {
       _sideCars.removeListener(_onSideCars);
@@ -2027,9 +2225,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
     final seamlessMode = playerSettings?.seamlessPlayback ?? true;
     // Watched, so a profile that resolves after the first frame - the usual
     // case on a television - re-lays the chrome out at ten-foot size.
-    _form = playerFormFactorOf(
-      ref.watch(deviceProfileProvider).asData?.value,
-    );
+    _form = playerFormFactorOf(ref.watch(deviceProfileProvider).asData?.value);
 
     return PopScope(
       canPop: true,
@@ -2048,7 +2244,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
               behavior: HitTestBehavior.opaque,
               onTap: _toggleControlsVisibility,
               onDoubleTapDown: (details) {
-                if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+                if (!kIsWeb &&
+                    (Platform.isWindows ||
+                        Platform.isLinux ||
+                        Platform.isMacOS)) {
                   _toggleFullscreen();
                 } else {
                   final screenWidth = MediaQuery.of(context).size.width;
@@ -2101,7 +2300,10 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                   ),
 
                   // Subtle Buffering Indicator
-                  if (_isBuffering && !_isLoading && !_isSwitching && _error.isEmpty)
+                  if (_isBuffering &&
+                      !_isLoading &&
+                      !_isSwitching &&
+                      _error.isEmpty)
                     const Center(
                       child: SizedBox(
                         width: 48,
@@ -2162,27 +2364,36 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                           _openCandidate(index, startAt: _position),
                       episodeLine: _effectiveCurrentEpisode != null
                           ? (_effectiveCurrentEpisode!.name.isNotEmpty
-                              ? (_effectiveCurrentEpisode!.season > 0
-                                  ? 'S${_effectiveCurrentEpisode!.season} E${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}'
-                                  : 'Episode ${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}')
-                              : (_effectiveCurrentEpisode!.season > 0
-                                  ? 'Season ${_effectiveCurrentEpisode!.season} Episode ${_effectiveCurrentEpisode!.episode}'
-                                  : 'Episode ${_effectiveCurrentEpisode!.episode}'))
+                                ? (_effectiveCurrentEpisode!.season > 0
+                                      ? 'S${_effectiveCurrentEpisode!.season} E${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}'
+                                      : 'Episode ${_effectiveCurrentEpisode!.episode} - ${_effectiveCurrentEpisode!.name}')
+                                : (_effectiveCurrentEpisode!.season > 0
+                                      ? 'Season ${_effectiveCurrentEpisode!.season} Episode ${_effectiveCurrentEpisode!.episode}'
+                                      : 'Episode ${_effectiveCurrentEpisode!.episode}'))
                           : null,
                       logoUrl: _item.logoUrl,
                       backdropUrl: _item.backdropImageUrl,
-                      sourceName: _candidates.isNotEmpty && _attemptIndex < _candidates.length
+                      sourceName:
+                          _candidates.isNotEmpty &&
+                              _attemptIndex < _candidates.length
                           ? _candidates[_attemptIndex].source
                           : null,
                       status: _isLoading
-                          ? (_candidates.isNotEmpty && _attemptIndex < _candidates.length
-                              ? 'Connecting to ${_candidates[_attemptIndex].source}…'
-                              : 'Loading high-performance stream…')
+                          ? (_candidates.isNotEmpty &&
+                                    _attemptIndex < _candidates.length
+                                ? 'Connecting to ${_candidates[_attemptIndex].source}…'
+                                : 'Loading high-performance stream…')
                           : null,
                       reason: _error.isNotEmpty ? _error : null,
                       failed: _error.isNotEmpty,
                       attempt: _candidates.isNotEmpty
-                          ? (index: (_attemptIndex + 1).clamp(1, _candidates.length), total: _candidates.length)
+                          ? (
+                              index: (_attemptIndex + 1).clamp(
+                                1,
+                                _candidates.length,
+                              ),
+                              total: _candidates.length,
+                            )
                           : null,
                       onBack: _exitPlayer,
                       onRetry: _startPlayback,
@@ -2201,7 +2412,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                         title: _nextEpisodeOffer!.name,
                         season: _nextEpisodeOffer!.season,
                         episode: _nextEpisodeOffer!.episode,
-                        posterUrl: _nextEpisodeOffer!.posterUrl ?? _item.posterImageUrl,
+                        posterUrl:
+                            _nextEpisodeOffer!.posterUrl ??
+                            _item.posterImageUrl,
                         rating: _nextEpisodeOffer!.rating,
                         runtime: _nextEpisodeOffer!.runtime != null
                             ? Duration(minutes: _nextEpisodeOffer!.runtime!)
@@ -2246,10 +2459,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
                       child: IgnorePointer(
                         ignoring: !_controlsVisible,
                         child: Stack(
-                          children: [
-                            _buildTopBar(),
-                            _buildBottomBar(),
-                          ],
+                          children: [_buildTopBar(), _buildBottomBar()],
                         ),
                       ),
                     ),
@@ -2371,7 +2581,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         leading: [
           PlayerIconButton(
             icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            tooltip: _playing ? (l10n?.pause ?? 'Pause') : (l10n?.play ?? 'Play'),
+            tooltip: _playing
+                ? (l10n?.pause ?? 'Pause')
+                : (l10n?.play ?? 'Play'),
             isTv: _isTv,
             iconSize: _isTv ? 34 : 30,
             // A remote starts on the press it makes most often.
@@ -2448,10 +2660,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             onPressed: _cycleFit,
           ),
           ListenableBuilder(
-            listenable: Listenable.merge([
-              _videoTracks,
-              _currentVideoTrack,
-            ]),
+            listenable: Listenable.merge([_videoTracks, _currentVideoTrack]),
             builder: (context, _) => PlayerActionButton(
               label: _currentQualityLabel,
               icon: Icons.high_quality_rounded,
@@ -2466,10 +2675,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
             onPressed: _showAudioTrackDialog,
           ),
           ListenableBuilder(
-            listenable: Listenable.merge([
-              _sideCars,
-              _activeEmbeddedSubtitle,
-            ]),
+            listenable: Listenable.merge([_sideCars, _activeEmbeddedSubtitle]),
             builder: (context, _) => PlayerIconButton(
               icon: Icons.subtitles_rounded,
               tooltip: l10n?.subtitles ?? 'Subtitles',
@@ -2480,7 +2686,8 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
               onPressed: _showSubtitleTrackDialog,
             ),
           ),
-          if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
+          if (!kIsWeb &&
+              (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
             PlayerIconButton(
               icon: _isFullscreen
                   ? Icons.fullscreen_exit_rounded

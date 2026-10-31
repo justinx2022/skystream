@@ -6,6 +6,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import '../logger/app_logger.dart';
+
 /// Quad-Redundant Encrypted DNS-over-HTTPS (DoH) Resolver.
 ///
 /// Bypasses ISP DNS poisoning, sinkholing, and domain blocks by resolving
@@ -66,10 +68,20 @@ class DohResolver {
       );
     }
 
-    return completer.future.timeout(
+    final answer = await completer.future.timeout(
       const Duration(milliseconds: 1500),
       onTimeout: () => null,
     );
+    if (answer == null) {
+      // The fallback is the system resolver, which on a poisoned network is
+      // exactly what DoH exists to avoid. Worth one line in the app log: a
+      // playback that fails here fails everywhere, and the cause is otherwise
+      // invisible once the app leaves the debug console.
+      talker.warning(
+        '[doh] $hostname did not resolve over DoH; using system DNS',
+      );
+    }
+    return answer;
   }
 
   /// Installs this resolver as [client]'s dialer.
@@ -96,7 +108,10 @@ class DohResolver {
         return ConnectionTask.fromSocket(Future.value(socket), socket.destroy);
       }
       try {
-        final tls = await SecureSocket.secure(socket, host: host);
+        final tls = await SecureSocket.secure(
+          socket,
+          host: host,
+        ).timeout(const Duration(seconds: 10));
         return ConnectionTask.fromSocket(Future.value(tls), tls.destroy);
       } catch (_) {
         socket.destroy();

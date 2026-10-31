@@ -93,6 +93,36 @@ class LocalProxyService {
 
   int get port => _serverPort;
 
+  /// The last few requests this proxy answered, for the player to read back.
+  ///
+  /// The full request log exists only behind `kDebugMode`, so a shipped build
+  /// keeps nothing, and "the player opened and never drew" arrives with no
+  /// evidence at all. These entries are bounded, carry no query string (a
+  /// signed CDN URL is a credential) and are read once per failed open, not
+  /// streamed anywhere.
+  static final List<String> _recentEvents = <String>[];
+
+  static List<String> get recentEvents => List.unmodifiable(_recentEvents);
+
+  static void _remember(String event) {
+    _recentEvents.add(event);
+    if (_recentEvents.length > 40) {
+      _recentEvents.removeAt(0);
+    }
+  }
+
+  static String _eventLabel(String url) {
+    try {
+      final uri = Uri.parse(url);
+      final path = uri.path.length > 60
+          ? '${uri.path.substring(0, 60)}…'
+          : uri.path;
+      return '${uri.host}$path';
+    } catch (_) {
+      return 'unparseable-url';
+    }
+  }
+
   /// Returns the pooled upstream client for this content type, building it on
   /// first use.
   ///
@@ -567,7 +597,6 @@ class LocalProxyService {
       unawaited(request.response.close());
       return;
     }
-
     // Scheme / shape validation — block file://, javascript:, data: and any
     // other non-network scheme that a malicious plugin could embed in a
     // stream URL it returns to us. Audit B4.
@@ -581,6 +610,10 @@ class LocalProxyService {
     }
 
     if (kDebugMode) debugPrint("[PROXY] Incoming Request for: $targetUrl");
+
+    final watch = Stopwatch()..start();
+    final label = _eventLabel(targetUrl);
+    _remember('GET $label');
 
     final Map<String, String> stickyHeaders = {};
     final hBase64 = request.uri.queryParameters['h'];
@@ -644,6 +677,10 @@ class LocalProxyService {
         );
         request.response.add(cached.bytes);
         await request.response.close();
+        _remember(
+          'cached $label ${cached.statusCode} ${cached.bytes.length}B '
+          '${watch.elapsedMilliseconds}ms',
+        );
         return;
       }
       prefetcher.onSegmentRequested(targetUrl, _clientFor);
@@ -887,8 +924,13 @@ class LocalProxyService {
         // Pipe binary data (segments, keys, etc.)
         await response.pipe(request.response);
       }
+      _remember(
+        '$label ${response.statusCode}'
+        '${isResponseM3u8 ? ' m3u8' : ''} ${watch.elapsedMilliseconds}ms',
+      );
     } catch (e) {
       if (kDebugMode) debugPrint("LocalProxyService: Proxy Request Error: $e");
+      _remember('ERR $label ${watch.elapsedMilliseconds}ms ${e.runtimeType}');
       // mpv drops connections constantly — every seek, track change and
       // failover — usually mid-body. By then the headers are gone and changing
       // the status is a StateError that would bury the error that caused it.
