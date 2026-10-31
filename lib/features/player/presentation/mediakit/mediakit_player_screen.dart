@@ -349,10 +349,13 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
+          await native.setProperty('cache-pause-wait', '0.5');
+          await native.setProperty('demuxer-lavf-probesize', '1048576');
+          await native.setProperty('demuxer-lavf-analyzeduration', '500000');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
-          await native.setProperty('stream-lavf-o', 'timeout=10000000');
+          await native.setProperty('stream-lavf-o', 'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2');
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         } else if (!kIsWeb && Platform.isWindows) {
           await native.setProperty('hwdec', 'auto-safe');
@@ -376,12 +379,15 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
+          await native.setProperty('cache-pause-wait', '0.5');
+          await native.setProperty('demuxer-lavf-probesize', '1048576');
+          await native.setProperty('demuxer-lavf-analyzeduration', '500000');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
 
           // Treat localhost as local (disable network buffering logic)
-          await native.setProperty('stream-lavf-o', 'timeout=10000000');
+          await native.setProperty('stream-lavf-o', 'timeout=10000000,reconnect_streamed=1,reconnect_delay_max=2');
           await native.setProperty('demuxer-lavf-o', 'allowed_extensions=ALL');
         }
 

@@ -59,6 +59,7 @@ class SegmentPrefetchManager {
     required bool isVod,
     required Map<String, String> stickyHeaders,
     ProxyOptions? options,
+    HttpClient Function({required bool autoUncompress})? clientFactory,
   }) {
     if (!enabled || segments.isEmpty) return;
 
@@ -68,7 +69,7 @@ class SegmentPrefetchManager {
       _sessions.remove(oldestKey);
     }
 
-    _sessions[playlistUrl] = _HlsPrefetchSession(
+    final session = _HlsPrefetchSession(
       playlistUrl: playlistUrl,
       segments: List.unmodifiable(segments),
       isVod: isVod,
@@ -76,11 +77,30 @@ class SegmentPrefetchManager {
       options: options,
       lastActive: DateTime.now(),
     );
+    _sessions[playlistUrl] = session;
 
     if (kDebugMode) {
       debugPrint(
         '[PREFETCH-BOOSTER] Registered playlist with ${segments.length} segments (isVod: $isVod)',
       );
+    }
+
+    // Pre-cache segment 0 and 1 immediately so that when the demuxer requests them,
+    // they are already warm in memory (0ms local retrieval).
+    if (clientFactory != null) {
+      final client = clientFactory(autoUncompress: false);
+      final count = segments.length > 2 ? 2 : segments.length;
+      for (int i = 0; i < count; i++) {
+        final segUrl = segments[i];
+        final normSeg = _norm(segUrl);
+        if (!_cache.containsKey(normSeg) && !_inFlight.containsKey(normSeg)) {
+          unawaited(_triggerPrefetch(
+            url: segUrl,
+            session: session,
+            client: client,
+          ));
+        }
+      }
     }
   }
 

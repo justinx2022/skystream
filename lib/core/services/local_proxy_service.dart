@@ -1165,6 +1165,7 @@ class LocalProxyService {
         isVod: isVod,
         stickyHeaders: stickyHeaders,
         options: options,
+        clientFactory: _clientFor,
       );
     }
 

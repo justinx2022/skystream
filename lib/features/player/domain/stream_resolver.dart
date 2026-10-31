@@ -753,6 +753,12 @@ Future<int> _firstHealthyStream(
       finish(pin);
       return;
     }
+    // Instant-Start Optimization: If the top preferred candidate answered and is healthy,
+    // open it immediately! Never delay the #1 ranked source for 1.2s to wait on lower-ranked mirrors.
+    if (results[start]?.outcome.reached ?? false) {
+      finish(start);
+      return;
+    }
     // The quickest answer wins as soon as nothing could still beat it.
     final best = fastestReached();
     if (best != null && !couldStillWin(best)) {
@@ -888,7 +894,7 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
       'Range',
       () => 'bytes=0-${kProbeSniffBytes - 1}',
     );
-    final resp = await client.send(request).timeout(const Duration(seconds: 2));
+    final resp = await client.send(request).timeout(const Duration(milliseconds: 1000));
     final ttfb = clock.elapsed;
     // Nothing to range over: an empty file, which the old one-byte check
     // passed too.
@@ -901,7 +907,7 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
       // range is sending the whole file behind these bytes.
       final head = mayBeWebPage(type)
           ? await _firstBytes(resp.stream).timeout(
-              const Duration(seconds: 3),
+              const Duration(milliseconds: 1000),
               onTimeout: () => const <int>[],
             )
           : const <int>[];
@@ -923,7 +929,7 @@ Future<_ProbeAnswer> _probeAnswer(StreamResult stream) async {
   try {
     final resp = await http
         .head(uri, headers: headers)
-        .timeout(const Duration(seconds: 2));
+        .timeout(const Duration(milliseconds: 1000));
     if (resp.statusCode < 400) {
       return _ProbeAnswer(ProbeOutcome.healthy, headClock.elapsed);
     }

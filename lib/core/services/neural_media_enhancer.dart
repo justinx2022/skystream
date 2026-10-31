@@ -58,8 +58,8 @@ class NeuralMediaEnhancer {
   static Map<String, String> buildDemuxerTuningOptions(AiSettings settings) {
     if (!settings.aiEnabled || !settings.dynamicDemuxerTuning) return const {};
     return const {
-      'demuxer-lavf-probesize': '4194304', // 4MB probe buffer prevents "demuxer out of range"
-      'demuxer-lavf-analyzeduration': '1500000', // 1.5s container analysis
+      'demuxer-lavf-probesize': '1048576', // 1MB probe buffer (instant startup, avoids out of range without 4MB delay)
+      'demuxer-lavf-analyzeduration': '500000', // 0.5s container analysis (fast time-to-first-frame)
       'hr-seek': 'yes',
       'hr-seek-framedrop': 'yes', // Drop intermediate frames for instantaneous scrubbing
     };
