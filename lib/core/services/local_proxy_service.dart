@@ -204,6 +204,8 @@ class LocalProxyService {
     final scheme = uri.scheme.toLowerCase();
     if (scheme != 'http' && scheme != 'https') return false;
     if (uri.host.isEmpty) return false;
+    // Reject recursive proxy loop to loopback
+    if (uri.host == '127.0.0.1' || uri.host == 'localhost') return false;
     return true;
   }
 

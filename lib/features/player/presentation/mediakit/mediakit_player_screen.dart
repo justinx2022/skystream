@@ -349,11 +349,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           await native.setProperty('framedrop', 'yes'); // Standard decode drop, NOT vo
           // Mobile cache tuning (high-throughput readahead, fills buffer aggressively)
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-pause', 'no'); // Instant first frame
-          await native.setProperty('demuxer-hysteresis', '1'); // Instant seek recovery
-          // Netflix-grade fast container analysis for ultra-low latency start
-          await native.setProperty('demuxer-lavf-probesize', '65536');
-          await native.setProperty('demuxer-lavf-analyzeduration', '50000');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
@@ -381,12 +376,6 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
 
           // High-throughput caching for instant start + full network line speed utilization
           await native.setProperty('cache', 'yes');
-          await native.setProperty('cache-pause', 'no'); // Zero-latency start
-          await native.setProperty('demuxer-hysteresis', '1'); // Micro-seek latch
-
-          // Netflix-grade fast container analysis for ultra-low latency start
-          await native.setProperty('demuxer-lavf-probesize', '65536');
-          await native.setProperty('demuxer-lavf-analyzeduration', '50000');
           await native.setProperty('hr-seek', 'yes');
           await native.setProperty('hr-seek-framedrop', 'yes');
           await native.setProperty('network-timeout', '10');
@@ -733,7 +722,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
         if (isBuffering && _isSettlingTrackChange) return;
         setState(() => _isBuffering = isBuffering);
 
-        if (isBuffering && _hasPlayedOnce && !_isLoading && !_isSwitching) {
+        if (isBuffering && _attemptReachedPicture && !_isLoading && !_isSwitching) {
           _midstreamStallWatchdog?.cancel();
           _midstreamStallWatchdog = Timer(const Duration(milliseconds: 4500), () {
             if (_disposed || !mounted) return;
@@ -1126,6 +1115,7 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
           url,
           headers: headers,
         );
+        _attemptTriedProxy = true;
         playHeaders = const {'X-Local-Proxy': '1'};
         if (_player.platform is NativePlayer) {
           final native = _player.platform as NativePlayer;
@@ -1177,6 +1167,9 @@ class _MediaKitPlayerScreenState extends ConsumerState<MediaKitPlayerScreen>
   ) async {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.scheme.startsWith('http')) return false;
+    if (uri.host == '127.0.0.1' || uri.host == 'localhost' || _attemptTriedProxy) {
+      return false;
+    }
     _attemptTriedProxy = true;
     try {
       await LocalProxyService.instance.startServer();
